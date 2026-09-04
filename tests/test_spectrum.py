@@ -2,7 +2,8 @@
 normalization, half-filling chemical potential, Dirac-point closure."""
 import numpy as np
 
-from hamop import bands, dos, fermi_level, band_edges, graphene, linear_chain
+from hamop import (bands, dos, fermi_level, band_edges, graphene,
+                   k_path, linear_chain)
 
 
 def test_chain_dos_matches_analytic_band_center():
@@ -48,3 +49,14 @@ def test_band_edges_report_the_ssh_gap():
     m.add_hop(1, 0, (1,), [[t2]])
     vbm, cbm, gap = band_edges(m, mu=0.0, mesh=2001)
     assert abs(gap - 2.0 * abs(abs(t1) - abs(t2))) < 1e-5
+
+
+def test_k_path_geometry():
+    kpts, dists, ticks = k_path([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+                                n_per_segment=10)
+    assert kpts.shape == (21, 2)
+    assert np.allclose(kpts[0], [0.0, 0.0])
+    assert np.allclose(kpts[10], [1.0, 0.0])
+    assert np.allclose(kpts[-1], [1.0, 1.0])
+    assert abs(dists[-1] - 2.0) < 1e-12
+    assert np.allclose(ticks, [0.0, 1.0, 2.0])
