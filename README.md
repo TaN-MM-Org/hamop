@@ -34,9 +34,13 @@ cannot disagree with each other.
   high-symmetry paths, Gaussian-broadened densities of states, chemical
   potential at a given filling by bisection, band edges and gap about a
   chemical potential.
-- **Optics** (`sigma_optical`, `drude_weight`): Kubo-Greenwood real
-  sheet conductivity in units of e²/(4ℏ) with Gaussian or Lorentzian
-  broadening, plus the intraband (Drude) weight — both built on the
+- **Optics** (`sigma_optical`, `sigma_tensor`, `drude_weight`):
+  Kubo-Greenwood real sheet conductivity in units of e²/(4ℏ) with
+  Gaussian or Lorentzian broadening, the full complex interband
+  conductivity tensor σ_ab(ω) — including the finite-frequency Hall
+  component σ_xy(ω), whose ω → 0 limit reproduces the TKNN
+  quantization σ_xy = C e²/h against the package's own Chern number,
+  sign included — plus the intraband (Drude) weight. All built on the
   nonorthogonal velocity correction
   `v = dH/dk − (eₙ+eₘ)/2 dS/dk` that makes them exactly invariant
   under a shift of the energy zero.
@@ -44,15 +48,37 @@ cannot disagree with each other.
   Wilson-loop Berry phases and the gauge-invariant lattice field
   strength of Fukui, Hatsugai and Suzuki (J. Phys. Soc. Jpn. 74, 1674
   (2005)), whose Brillouin-zone sum is an exact integer — the Chern
-  number. Orthogonal bases only for now, refused explicitly otherwise.
+  number. Nonorthogonal bases are handled through the smooth Löwdin
+  frame d = S(k)^½ c, a bundle isomorphism under which the Chern
+  number is invariant (Berry-phase *values* inherit the frame
+  convention on top of the usual origin convention; the quantized
+  statements do not).
+- **Spin** (`with_spin`, `PAULI`, `kane_mele`): spin doubling as a
+  stated convention (spin innermost, blocks tensored with Pauli
+  matrices), so Zeeman and intrinsic spin-orbit terms are ordinary
+  hopping blocks; the Kane-Mele model ships as the canonical
+  spin-orbit anchor.
 - **Transport** (`sancho_rubio`, `transmission`,
-  `transmission_direct`, `principal_layers`): two-probe Landauer
-  transmission with Sancho-Rubio lead surface Green functions and a
-  recursive Green function sweep, nonorthogonal bases included, plus a
-  dense direct-inversion reference implementation of the same quantity
-  — and automatic partitioning of a finite model into principal
-  layers, which *verifies* that no coupling skips a layer instead of
-  silently truncating it.
+  `transmission_direct`, `principal_layers`,
+  `buttiker_transmission`): two-probe Landauer transmission with
+  Sancho-Rubio lead surface Green functions and a recursive Green
+  function sweep, nonorthogonal bases included, plus a dense
+  direct-inversion reference implementation of the same quantity — and
+  automatic partitioning of a finite model into principal layers,
+  which *verifies* that no coupling skips a layer instead of silently
+  truncating it. User-supplied retarded interaction self-energies
+  Σ(E) can be attached per layer, and a current-conserving Büttiker
+  dephasing probe (Phys. Rev. B 33, 3020 (1986)) is built in.
+- **Sparse / large systems** (`bloch_sparse`, `lowest_bands`,
+  `kpm_dos`): CSR assembly of the identical Bloch matrices, Lanczos
+  diagonalization of just the low-energy window (generalized
+  eigenproblem included), and the kernel polynomial method for the
+  density of states with the Jackson kernel (Weisse et al., Rev. Mod.
+  Phys. 78, 275 (2006)) — deterministic or stochastic trace.
+- **k-mesh reduction**: `monkhorst_pack(mesh, time_reversal=True)`
+  folds k with −k for k-even observables, roughly halving the work; the
+  fold is only offered when every real-space block is real (so
+  H(−k) = conj H(k) is guaranteed) and refused otherwise.
 - **`gen_eigh`**: generalized eigensolver with canonical
   orthogonalization (Szabo and Ostlund, *Modern Quantum Chemistry*,
   sec. 3.4.5), so mildly overcomplete overlaps cannot blow up the
@@ -98,7 +124,35 @@ exact result, not a stored number:
   zero in a nonorthogonal basis;
 - the automatic principal-layer partition reproduces hand-built blocks
   exactly, reproduces the single-impurity closed form end to end, and
-  refuses a layer width smaller than the interaction range.
+  refuses a layer width smaller than the interaction range;
+- σ_xy(0) of the gapped Haldane model equals its Chern number times
+  e²/h (TKNN; Phys. Rev. Lett. 49, 405 (1982)) to 10⁻⁶, **sign
+  included**, computed by two independent routes through the package
+  (Kubo tensor vs. lattice field strength); it vanishes in the trivial
+  phase, and the tensor is antisymmetric to machine precision;
+- the Chern number survives a nonorthogonal deformation of the basis
+  unchanged (the Löwdin frame is a bundle isomorphism), and the
+  overlap-SSH chain keeps its quantized Zak phases with the exact π
+  difference;
+- the Kane-Mele model equals two Haldane copies to machine precision,
+  its spin-orbit gap at K is exactly 6√3 λ_so, its total Chern number
+  vanishes and its spin sectors carry ±1 (Kane and Mele, Phys. Rev.
+  Lett. 95, 226801 (2005)); spin doubling is an exact double
+  degeneracy, and a Zeeman term splits it by exactly 2B;
+- a constant self-energy on one layer reproduces the impurity closed
+  form; the recursive sweep with complex Σ(E) agrees with direct
+  inversion to machine precision; the Büttiker probe at γ = 0 is the
+  coherent result exactly, matches the hand-written scalar closed form
+  on a single-site device, and suppresses the double-barrier
+  resonance;
+- the time-reversal-folded k-mesh reproduces full-grid DOS, σ(ω) and
+  Drude weight to 10⁻¹² with roughly half the points, and refuses
+  complex-block models;
+- the sparse assembly equals the dense assembly element for element;
+  the Lanczos window reproduces the open chain's closed form
+  2t cos(πj/(N+1)) (nonorthogonal variant included); the KPM density
+  of states matches the chain's closed form at the band center and
+  integrates to the orbital count.
 
 Run them yourself: `pip install -e .[test]` then `pytest`.
 
@@ -144,24 +198,32 @@ Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.
 
 ## Status
 
-v0.2.0 (alpha). Implemented and tested: the model container with exact
+v0.3.0 (alpha). Implemented and tested: the model container with exact
 k-derivatives, canonical-orthogonalization eigensolver, band
 structures and k-paths, densities of states, filling-resolved chemical
 potentials, band edges, Kubo-Greenwood optical conductivity (Gaussian
-or Lorentzian broadening) and the intraband Drude weight for periodic
-and finite systems, Wilson-loop Berry phases, lattice Berry curvature
-and Chern numbers, Sancho-Rubio surface Green functions, recursive
-plus direct-inversion Landauer transmission, and verified automatic
-principal-layer partitioning.
+or Lorentzian broadening), the complex interband conductivity tensor
+σ_ab(ω) including the finite-frequency Hall component, and the
+intraband Drude weight for periodic and finite systems; Wilson-loop
+Berry phases, lattice Berry curvature and Chern numbers, in orthogonal
+and (through the Löwdin frame) nonorthogonal bases; spin doubling,
+Pauli-block spin-orbit terms and the Kane-Mele builder; Sancho-Rubio
+surface Green functions, recursive plus direct-inversion Landauer
+transmission, verified automatic principal-layer partitioning,
+per-layer interaction self-energies and the Büttiker dephasing probe;
+time-reversal k-mesh folding; sparse Bloch assembly, Lanczos
+low-energy bands and the KPM density of states.
 
-Not yet implemented, stated plainly: k-space symmetry reduction (grids
-are full Monkhorst-Pack), Berry phases in nonorthogonal bases (refused
-with an explicit error), the finite-frequency Hall conductivity
-σ_xy(ω) (the Chern number is implemented; the full Hall spectrum is
-not), spin-orbit-coupled blocks as a first-class convention (complex
-blocks work, but no helper), and interaction self-energies in the
-transport module. Sparse or very large models are out of scope for
-now: matrices are dense.
+Not yet implemented, stated plainly: point-group k-mesh reduction
+(only the time-reversal fold is implemented, and only for real-block
+models); *self-consistent* interaction self-energies (SCBA
+electron-phonon or similar — Σ(E) must be supplied, or the
+phenomenological Büttiker probe used); Berry phases beyond the Löwdin
+frame convention for nonorthogonal bases; KPM for nonorthogonal bases
+(refused explicitly); sparse optics, topology and transport (the
+sparse path covers spectra and DOS only); and magnetic fields via
+Peierls substitution. The velocity operator still neglects the
+intra-atomic dipole contribution, as stated under Conventions.
 
 ## Where it comes from
 

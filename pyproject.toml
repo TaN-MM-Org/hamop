@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hamop"
-version = "0.2.0"
+version = "0.3.0"
 description = "One tight-binding Hamiltonian, every observable: bands, DOS, Kubo optical conductivity and NEGF transmission from the same real-space blocks, nonorthogonal bases included"
 readme = "README.md"
 license = { text = "Apache-2.0" }
