@@ -19,7 +19,7 @@ from .model import TightBindingModel
 from .negf import sancho_rubio, transmission, transmission_direct
 from .spectrum import band_edges, bands, dos, fermi_level
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges",
