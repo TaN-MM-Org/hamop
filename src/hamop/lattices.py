@@ -68,31 +68,41 @@ def chain_lead_blocks(t=-1.0, e0=0.0, per_layer=1):
     return H00, H01
 
 
-def ssh(t1=-1.0, t2=-0.6, a=2.0):
+def ssh(t1=-1.0, t2=-0.6, a=2.0, s=None):
     """Su-Schrieffer-Heeger dimerized chain: intra-cell hop t1, inter-cell
     hop t2, gap 2 | |t1| - |t2| | at the zone boundary, and a Zak phase
-    that differs by pi between the two dimerizations."""
+    that differs by pi between the two dimerizations.
+
+    s: optional overlap on both bonds (nonorthogonal SSH chain), which
+    preserves the inversion symmetry and with it the Zak quantization.
+    """
     m = TightBindingModel(positions=[[0.0], [0.5 * a]], norb=1, cell=[[a]])
-    m.add_hop(0, 1, (0,), [[t1]])
-    m.add_hop(1, 0, (1,), [[t2]])
+    m.add_hop(0, 1, (0,), [[t1]], None if s is None else [[s]])
+    m.add_hop(1, 0, (1,), [[t2]], None if s is None else [[s]])
     return m
 
 
-def haldane(t1=-1.0, t2=0.1, phi=0.5 * np.pi, m_ab=0.0, a=1.0):
+def haldane(t1=-1.0, t2=0.1, phi=0.5 * np.pi, m_ab=0.0, a=1.0, s=None):
     """Haldane honeycomb model (Haldane, PRL 61, 2015 (1988)): real
     nearest-neighbour hop t1, complex second-neighbour hop t2 e^{i phi}
     with opposite chirality on the two sublattices, and a sublattice
     mass +/- m_ab.  The lower band carries Chern number +/-1 when
     |m_ab| < 3 sqrt(3) |t2 sin phi| and 0 outside -- the anchor the
-    topology tests are pinned to."""
+    topology tests are pinned to.
+
+    s: optional real nearest-neighbour overlap, which deforms the bands
+    smoothly without closing the gap for small s, so the Chern number
+    (computed in the Loewdin frame) must not change -- the anchor for
+    topology in a nonorthogonal basis."""
     cell = a * np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
     pos = np.array([np.zeros(2), (cell[0] + cell[1]) / 3.0])
     mdl = TightBindingModel(positions=pos, norb=1, cell=cell)
+    sb = None if s is None else [[s]]
     mdl.add_hop(0, 0, (0, 0), [[+m_ab]])
     mdl.add_hop(1, 1, (0, 0), [[-m_ab]])
-    mdl.add_hop(0, 1, (0, 0), [[t1]])
-    mdl.add_hop(0, 1, (-1, 0), [[t1]])
-    mdl.add_hop(0, 1, (0, -1), [[t1]])
+    mdl.add_hop(0, 1, (0, 0), [[t1]], sb)
+    mdl.add_hop(0, 1, (-1, 0), [[t1]], sb)
+    mdl.add_hop(0, 1, (0, -1), [[t1]], sb)
     tc = t2 * np.exp(1j * phi)
     for img in [(1, 0), (-1, 1), (0, -1)]:      # chirality on sublattice A
         mdl.add_hop(0, 0, img, [[tc]])

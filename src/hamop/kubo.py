@@ -27,7 +27,8 @@ import numpy as np
 
 from .eigsolve import gen_eigh
 
-__all__ = ["sigma_optical", "carrier_count", "drude_weight"]
+__all__ = ["sigma_optical", "sigma_tensor", "carrier_count",
+           "drude_weight"]
 
 KB = 8.617333262e-5  # eV / K
 
@@ -83,6 +84,71 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
             sig[iw] += w * (df * A2 * g / np.where(mask, dE, 1.0))[mask].sum()
     # sigma / (e^2 / 4 hbar) = spin * 4 pi / area * sum, M in eV*A, dE in eV
     return sig * spin * 4.0 * np.pi / area
+
+
+def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
+                 weights=None, T=300.0, eta=1e-3, spin=2, thresh=1e-10):
+    """Complex interband conductivity tensor component sigma_ab(omega),
+    in units of e^2 / (4 hbar).
+
+    directions: the pair (a, b) of Cartesian axes; (0, 1) is sigma_xy,
+    the finite-frequency Hall conductivity, and (0, 0) recovers the
+    longitudinal component (its real part agrees with
+    :func:`sigma_optical` with the Lorentzian lineshape up to the
+    antiresonant terms sigma_optical drops -- asserted in the tests).
+
+    The Kubo formula summed over interband pairs only,
+
+        sigma_ab = -(4 i spin / A) sum_k w_k sum_{n != m}
+                   (f_n - f_m) M^a_nm M^b_mn
+                   / [dE_mn (dE_mn - omega - i eta)],
+
+    with the same nonorthogonal velocity M as sigma_optical.  omega = 0
+    is allowed (eta regularizes).  The intraband (Drude) part is *not*
+    included; combine with :func:`drude_weight` for metals.
+
+    Anchor (TKNN; Thouless, Kohmoto, Nightingale and den Nijs, Phys.
+    Rev. Lett. 49, 405 (1982)): for a Chern insulator at T -> 0 with mu
+    in the gap, sigma_xy(0) = C e^2/h = (2 C / pi) in these units, with
+    C exactly the package's :func:`hamop.chern_number` of the occupied
+    bands -- the test suite asserts that internal consistency on the
+    Haldane model, sign included.
+    """
+    a, b = directions
+    omega = np.atleast_1d(np.asarray(omega, dtype=float))
+    if mesh is not None or kpts is not None:
+        if mesh is not None:
+            kpts, weights = model.monkhorst_pack(mesh)
+        elif weights is None:
+            weights = np.full(len(kpts), 1.0 / len(kpts))
+        area = model.cell_volume
+    else:
+        if model.cell is not None:
+            raise ValueError("periodic model: give mesh or kpts")
+        kpts, weights, area = [None], [1.0], 1.0
+    sig = np.zeros(len(omega), dtype=complex)
+    for k, w in zip(kpts, weights):
+        H, S = model.bloch(k)
+        dHa, dSa = model.bloch_derivative(k, a)
+        e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
+        Ma = c.conj().T @ dHa @ c \
+            - 0.5 * (e[:, None] + e[None, :]) * (c.conj().T @ dSa @ c)
+        if b == a:
+            Mb = Ma
+        else:
+            dHb, dSb = model.bloch_derivative(k, b)
+            Mb = c.conj().T @ dHb @ c \
+                - 0.5 * (e[:, None] + e[None, :]) * (c.conj().T @ dSb @ c)
+        x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
+        f = 1.0 / (1.0 + np.exp(x))
+        dE = e[None, :] - e[:, None]          # E_m - E_n
+        df = f[:, None] - f[None, :]          # f_n - f_m
+        num = df * Ma * Mb.T                  # (f_n - f_m) M^a_nm M^b_mn
+        mask = np.abs(dE) > 1e-9              # strictly interband
+        for iw, hw in enumerate(omega):
+            den = dE * (dE - hw - 1j * eta)
+            sig[iw] += w * (num[mask] / den[mask]).sum()
+    return sig * (-4j) * spin / area
 
 
 def carrier_count(model, mu, mesh=None, kpts=None, weights=None, T=300.0,

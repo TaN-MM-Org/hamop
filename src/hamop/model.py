@@ -176,12 +176,27 @@ class TightBindingModel:
         return k
 
     # ------------------------------------------------------------------
-    def monkhorst_pack(self, mesh):
+    def all_blocks_real(self):
+        """True when every stored H and S block is real, in which case
+        H(-k) = conj(H(k)) and the spectrum is even in k (spinless
+        time-reversal symmetry of the assembly)."""
+        return all(np.all(Hb.imag == 0.0)
+                   and (Sb is None or np.all(Sb.imag == 0.0))
+                   for _, _, _, Hb, Sb in self._hops)
+
+    def monkhorst_pack(self, mesh, time_reversal=False):
         """Uniform Gamma-centered k-grid over the Brillouin zone.
 
         mesh: number of points per reciprocal direction (int or sequence
         matching the cell dimension).  Returns (kpts_cart, weights) with
         weights summing to one.
+
+        time_reversal=True folds k and -k into one point of doubled
+        weight (roughly halving the work), which is exact for k-even
+        observables -- eigenvalue sums, the DOS, sigma_xx, the Drude
+        weight.  The fold is guaranteed only when every real-space block
+        is real, so that H(-k) = conj(H(k)); a model with complex blocks
+        (e.g. Haldane) is refused rather than silently averaged.
         """
         if self.cell is None:
             raise ValueError("finite system has no Brillouin zone")
@@ -189,12 +204,33 @@ class TightBindingModel:
         if np.isscalar(mesh):
             mesh = (int(mesh),) * dim
         recip = 2.0 * np.pi * np.linalg.inv(self.cell).T
-        grids = [np.arange(n) / n for n in mesh]
-        frac = np.stack(np.meshgrid(*grids, indexing="ij"),
-                        axis=-1).reshape(-1, dim)
-        kpts = frac @ recip
-        w = np.full(len(kpts), 1.0 / len(kpts))
-        return kpts, w
+        if not time_reversal:
+            grids = [np.arange(n) / n for n in mesh]
+            frac = np.stack(np.meshgrid(*grids, indexing="ij"),
+                            axis=-1).reshape(-1, dim)
+            kpts = frac @ recip
+            w = np.full(len(kpts), 1.0 / len(kpts))
+            return kpts, w
+        if not self.all_blocks_real():
+            raise ValueError(
+                "time_reversal=True needs every real-space block real "
+                "(H(-k) = conj(H(k))); this model has complex blocks, "
+                "so the k <-> -k fold is not guaranteed exact")
+        ntot = int(np.prod(mesh))
+        frac_rows, weights = [], []
+        for flat in range(ntot):
+            idx, rest = [], flat
+            for n in reversed(mesh):
+                idx.append(rest % n)
+                rest //= n
+            idx = tuple(reversed(idx))
+            partner = tuple((-i) % n for i, n in zip(idx, mesh))
+            if idx > partner:
+                continue                      # its partner represents it
+            frac_rows.append([i / n for i, n in zip(idx, mesh)])
+            weights.append((1.0 if idx == partner else 2.0) / ntot)
+        kpts = np.asarray(frac_rows) @ recip
+        return kpts, np.asarray(weights)
 
     @property
     def cell_volume(self):

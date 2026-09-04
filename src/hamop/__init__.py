@@ -15,21 +15,26 @@ package is the general-purpose engine distilled from that pipeline.
 from .berry import berry_curvature, berry_phase, chern_number
 from .device import principal_layers
 from .eigsolve import gen_eigh
-from .kubo import carrier_count, drude_weight, sigma_optical
+from .kubo import carrier_count, drude_weight, sigma_optical, sigma_tensor
 from .lattices import (chain_lead_blocks, graphene, haldane,
                        linear_chain, ssh, two_site)
 from .model import TightBindingModel
-from .negf import sancho_rubio, transmission, transmission_direct
+from .negf import (buttiker_transmission, sancho_rubio, transmission,
+                   transmission_direct)
+from .sparse import bloch_sparse, kpm_dos, lowest_bands
 from .spectrum import band_edges, bands, dos, fermi_level, k_path
+from .spin import PAULI, kane_mele, with_spin
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
-    "sigma_optical", "drude_weight", "carrier_count",
+    "sigma_optical", "sigma_tensor", "drude_weight", "carrier_count",
     "berry_phase", "berry_curvature", "chern_number",
     "sancho_rubio", "transmission", "transmission_direct",
-    "principal_layers",
+    "buttiker_transmission", "principal_layers",
+    "bloch_sparse", "lowest_bands", "kpm_dos",
+    "PAULI", "with_spin", "kane_mele",
     "linear_chain", "two_site", "graphene", "ssh", "haldane",
     "chain_lead_blocks",
 ]
