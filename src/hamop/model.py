@@ -51,6 +51,7 @@ class TightBindingModel:
         self.offsets = np.concatenate([[0], np.cumsum(self.norb)])
         self.nao = int(self.offsets[-1])
         self._hops = []
+        self._dipoles = {}
 
     # ------------------------------------------------------------------
     def add_hop(self, i, j, image, H_block, S_block=None):
@@ -84,6 +85,45 @@ class TightBindingModel:
 
     def has_overlap(self):
         return any(h[4] is not None for h in self._hops)
+
+    # ------------------------------------------------------------------
+    def set_dipole(self, i, X):
+        """Intra-atomic dipole matrix elements of site ``i``.
+
+        X: array of shape (norb_i, norb_i, dim) -- the on-site position
+        matrix elements <alpha| r_a - tau_i |beta> in Angstrom, one
+        Hermitian block per Cartesian direction.  The optics modules add
+        the corresponding velocity contribution i (E_n - E_m) X_nm to
+        the interband matrix element, restoring transitions that the
+        site-diagonal position approximation leaves dark (e.g. s -> p
+        on one atom).  Orthogonal bases only; the overlap generalization
+        is not implemented and is refused in the optics.
+        """
+        i = int(i)
+        X = np.asarray(X, dtype=complex)
+        dim = self.positions.shape[1]
+        if X.shape != (self.norb[i], self.norb[i], dim):
+            raise ValueError(
+                f"dipole block must have shape "
+                f"({self.norb[i]}, {self.norb[i]}, {dim})")
+        for a in range(dim):
+            if not np.allclose(X[:, :, a], X[:, :, a].conj().T):
+                raise ValueError("dipole blocks must be Hermitian "
+                                 "per direction")
+        self._dipoles[i] = X
+
+    def has_dipoles(self):
+        return bool(self._dipoles)
+
+    def dipole_matrix(self, direction=0):
+        """Block-diagonal intra-atomic dipole operator X_a (nao x nao),
+        zero wherever no dipole block was set."""
+        X = np.zeros((self.nao, self.nao), dtype=complex)
+        for i, blk in self._dipoles.items():
+            o = self.offsets[i]
+            n = self.norb[i]
+            X[o:o + n, o:o + n] = blk[:, :, direction]
+        return X
 
     # ------------------------------------------------------------------
     def _displacement(self, i, j, image):

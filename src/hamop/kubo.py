@@ -33,6 +33,22 @@ __all__ = ["sigma_optical", "sigma_tensor", "carrier_count",
 KB = 8.617333262e-5  # eV / K
 
 
+def _dipole_term(model, c, e, direction):
+    """Intra-atomic dipole contribution to the velocity matrix element,
+    i (E_n - E_m) <n|X_a|m>, from v = (i/hbar)[H, r] with the on-site
+    position blocks the model carries.  None when the model has no
+    dipole blocks.  Orthogonal bases only (the overlap generalization
+    of [H, r] is not implemented); refused otherwise."""
+    if not model.has_dipoles():
+        return None
+    if model.has_overlap():
+        raise ValueError(
+            "intra-atomic dipoles are implemented for orthogonal bases "
+            "only; this model carries overlap blocks")
+    Xn = c.conj().T @ model.dipole_matrix(direction) @ c
+    return 1j * (e[:, None] - e[None, :]) * Xn
+
+
 def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
                   T=300.0, eta=0.05, direction=0, spin=2, thresh=1e-10,
                   lineshape="gaussian"):
@@ -69,6 +85,9 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
         M = c.conj().T @ dH @ c
         Sd = c.conj().T @ dS @ c
         M = M - 0.5 * (e[:, None] + e[None, :]) * Sd
+        Xt = _dipole_term(model, c, e, direction)
+        if Xt is not None:
+            M = M + Xt
         dE = e[None, :] - e[:, None]          # E_m - E_n
         df = f[:, None] - f[None, :]          # f_n - f_m
         A2 = np.abs(M) ** 2
@@ -133,12 +152,18 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
         e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
         Ma = c.conj().T @ dHa @ c \
             - 0.5 * (e[:, None] + e[None, :]) * (c.conj().T @ dSa @ c)
+        Xa = _dipole_term(model, c, e, a)
+        if Xa is not None:
+            Ma = Ma + Xa
         if b == a:
             Mb = Ma
         else:
             dHb, dSb = model.bloch_derivative(k, b)
             Mb = c.conj().T @ dHb @ c \
                 - 0.5 * (e[:, None] + e[None, :]) * (c.conj().T @ dSb @ c)
+            Xb = _dipole_term(model, c, e, b)
+            if Xb is not None:
+                Mb = Mb + Xb
         x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
         f = 1.0 / (1.0 + np.exp(x))
         dE = e[None, :] - e[:, None]          # E_m - E_n

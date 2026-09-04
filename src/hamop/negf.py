@@ -26,7 +26,8 @@ from __future__ import annotations
 import numpy as np
 
 __all__ = ["sancho_rubio", "transmission", "transmission_direct",
-           "buttiker_transmission"]
+           "buttiker_transmission", "scba_transmission",
+           "transmission_sparse"]
 
 
 def _sigma_at(sigma_int, i, E, n):
@@ -265,3 +266,144 @@ def buttiker_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
         out["T_LR"][iE], out["T_Lp"][iE], out["T_pR"][iE] = T_LR, T_Lp, T_pR
         out["T_eff"][iE] = T_eff
     return out if return_parts else out["T_eff"]
+
+
+def _assemble_device(E, layers_H, coup_H, layers_S, coup_S, eta,
+                     sigma_int=None):
+    """Full device matrix A = z S - H - Sigma_int(E) (leads not yet
+    attached) plus the block offsets."""
+    N = len(layers_H)
+    sizes = [len(h) for h in layers_H]
+    offs = np.concatenate([[0], np.cumsum(sizes)])
+    z = E + 1j * eta
+    A = np.zeros((offs[-1], offs[-1]), dtype=complex)
+    for i in range(N):
+        Si = layers_S[i]
+        blk = z * (np.eye(sizes[i]) if Si is None else Si) - layers_H[i]
+        sg = _sigma_at(sigma_int, i, E, sizes[i])
+        if sg is not None:
+            blk = blk - sg
+        A[offs[i]:offs[i + 1], offs[i]:offs[i + 1]] = blk
+        if i < N - 1:
+            Sc = coup_S[i]
+            tau = (z * (np.zeros_like(coup_H[i]) if Sc is None else Sc)
+                   - coup_H[i])
+            A[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = tau
+            A[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = tau.conj().T
+    return A, offs
+
+
+def scba_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01, W2,
+                      layers_S=None, coup_S=None, lead_S00=None,
+                      lead_S01=None, eta=1e-6, mixing=0.5, tol=1e-10,
+                      maxiter=1000, return_info=False):
+    """Transmission through a device with an elastic self-consistent
+    Born (SCBA) self-energy for uncorrelated on-site disorder.
+
+    Convention: on-site disorder of variance W2 (eV^2) per orbital,
+    uncorrelated between orbitals, gives the retarded self-energy
+
+        Sigma_i(E) = W2_i * diag( G_ii(E) )      (diagonal per orbital),
+
+    iterated to self-consistency with the full device Green function
+    (leads attached) by damped fixed-point iteration.  W2: scalar, or
+    one value per layer.  This is the standard first-order
+    self-consistent Born treatment of disorder averaging; the returned
+    T is the Caroli trace of the *averaged* Green function -- vertex
+    corrections to the conductance are not included, stated plainly.
+    Only elastic (energy-diagonal) self-energies are treated;
+    inelastic (Keldysh) electron-phonon SCBA is not implemented.
+
+    Anchors asserted in the tests: W2 = 0 reproduces the coherent
+    transmission exactly; the converged Sigma satisfies its own
+    equation to below ``tol``; Im Sigma <= 0 (retarded causality); and
+    the central-layer Sigma of a long uniform chain reproduces the
+    *bulk* scalar SCBA equation Sigma = W2 * g_loc(E - Sigma), solved
+    independently from the closed-form chain Green function.
+
+    Returns T(E), or (T, info) with info["sigma"] the converged
+    per-layer self-energies, info["niter"], info["residual"].
+    """
+    N = len(layers_H)
+    layers_S = [None] * N if layers_S is None else layers_S
+    coup_S = [None] * (N - 1) if coup_S is None else coup_S
+    sizes = [len(h) for h in layers_H]
+    W2 = np.broadcast_to(np.asarray(W2, dtype=float), (N,))
+    T = np.zeros(len(E_list))
+    info = {"sigma": [], "niter": [], "residual": []}
+    for iE, E in enumerate(E_list):
+        sigL, sigR, gamL, gamR = _lead_sigmas(
+            E, lead_H00, lead_H01, lead_S00, lead_S01, eta)
+        A0, offs = _assemble_device(E, layers_H, coup_H, layers_S,
+                                    coup_S, eta)
+        A0[offs[0]:offs[1], offs[0]:offs[1]] -= sigL
+        A0[offs[N - 1]:offs[N], offs[N - 1]:offs[N]] -= sigR
+        sig = [np.zeros(sizes[i], dtype=complex) for i in range(N)]
+        res = np.inf
+        for it in range(maxiter):
+            A = A0.copy()
+            for i in range(N):
+                idx = np.arange(offs[i], offs[i + 1])
+                A[idx, idx] -= sig[i]
+            G = np.linalg.inv(A)
+            res = 0.0
+            new = []
+            for i in range(N):
+                gd = np.diag(G[offs[i]:offs[i + 1], offs[i]:offs[i + 1]])
+                target = W2[i] * gd
+                res = max(res, float(np.abs(target - sig[i]).max()))
+                new.append((1.0 - mixing) * sig[i] + mixing * target)
+            sig = new
+            if res < tol:
+                break
+        else:
+            raise RuntimeError(
+                f"SCBA did not converge at E = {E} "
+                f"(residual {res:.2e} after {maxiter} iterations); "
+                "try smaller mixing or larger eta")
+        # transmission of the averaged Green function
+        A = A0.copy()
+        for i in range(N):
+            idx = np.arange(offs[i], offs[i + 1])
+            A[idx, idx] -= sig[i]
+        G = np.linalg.inv(A)
+        G1N = G[offs[N - 1]:offs[N], offs[0]:offs[1]]
+        T[iE] = float(np.real(np.trace(
+            gamR @ G1N @ gamL @ G1N.conj().T)))
+        info["sigma"].append(sig)
+        info["niter"].append(it + 1)
+        info["residual"].append(res)
+    return (T, info) if return_info else T
+
+
+def transmission_sparse(E_list, layers_H, coup_H, lead_H00, lead_H01,
+                        layers_S=None, coup_S=None, lead_S00=None,
+                        lead_S01=None, eta=1e-6, sigma_int=None):
+    """T(E) with the full device matrix stored sparse and factorized by
+    sparse LU -- the large-device counterpart of
+    :func:`transmission_direct`, solving only for the left-edge block
+    of the Green function.  Must agree with the dense routines to
+    machine precision (asserted in the tests), including overlap and
+    ``sigma_int``.
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import splu
+    N = len(layers_H)
+    layers_S = [None] * N if layers_S is None else layers_S
+    coup_S = [None] * (N - 1) if coup_S is None else coup_S
+    T = np.zeros(len(E_list))
+    for iE, E in enumerate(E_list):
+        sigL, sigR, gamL, gamR = _lead_sigmas(
+            E, lead_H00, lead_H01, lead_S00, lead_S01, eta)
+        A, offs = _assemble_device(E, layers_H, coup_H, layers_S,
+                                   coup_S, eta, sigma_int)
+        A[offs[0]:offs[1], offs[0]:offs[1]] -= sigL
+        A[offs[N - 1]:offs[N], offs[N - 1]:offs[N]] -= sigR
+        lu = splu(csr_matrix(A).tocsc())
+        rhs = np.zeros((offs[-1], offs[1] - offs[0]), dtype=complex)
+        rhs[offs[0]:offs[1]] = np.eye(offs[1] - offs[0])
+        X = lu.solve(rhs)
+        G1N = X[offs[N - 1]:offs[N], :]      # G_{N,1}
+        T[iE] = float(np.real(np.trace(
+            gamR @ G1N @ gamL @ G1N.conj().T)))
+    return T

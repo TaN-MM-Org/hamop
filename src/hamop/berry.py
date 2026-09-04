@@ -33,6 +33,22 @@ convention on top of the usual origin convention; the quantized
 statements -- integer Chern numbers, Zak phases of 0 or pi under
 inversion, the pi difference between SSH dimerizations -- do not.)
 For an orthogonal model S = 1 and d = c, so nothing changes there.
+
+Two frames are available.  frame="lowdin" (default) is the periodic
+gauge with the Loewdin map described above.  frame="atomic" instead
+takes everything from the same atomic-gauge assembly as the rest of
+the package (``model.bloch``), with inter-k links
+c(k1)^dag S((k1+k2)/2) c(k2) -- the discrete inner product implied by
+the site-diagonal position operator, i.e. exactly the approximation
+the velocity operator already uses.  Berry-phase *values* differ
+between frames by the usual convention shifts; the topological
+statements -- integer Chern numbers, and which integer -- must agree,
+and the tests assert that they do.  In the atomic gauge H(k+G) is not
+H(k), so a loop that spans the zone must say so via ``closure``.
+
+Large unit cells with few occupied bands can use solver="sparse"
+(orthogonal models, Lanczos for the occupied states); it must return
+the same integers as the dense path, and the tests assert that too.
 """
 from __future__ import annotations
 
@@ -80,12 +96,34 @@ def _bloch_periodic(model, k):
     return 0.5 * (H + H.conj().T), S
 
 
-def _occ_states(model, k, n_occ):
-    """Loewdin-orthonormal frame of the lowest n_occ bands at k."""
+def _lowest_dense(H, n_occ):
+    _, c = eigh(H)
+    return c[:, :n_occ]
+
+
+def _lowest_sparse(H, n_occ):
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import eigsh
+    n = H.shape[0]
+    if not n_occ < n - 1:
+        raise ValueError(
+            "solver='sparse' (Lanczos) needs n_occ < nao - 1; use the "
+            "dense solver for this small a matrix")
+    _, c = eigsh(csr_matrix(H), k=n_occ, which="SA")
+    return c
+
+
+def _occ_states(model, k, n_occ, solver="dense"):
+    """Loewdin-orthonormal frame of the lowest n_occ bands at k
+    (periodic gauge)."""
     H, S = _bloch_periodic(model, k)
     if not model.has_overlap():
-        _, c = eigh(H)
-        return c[:, :n_occ]
+        if solver == "sparse":
+            return _lowest_sparse(H, n_occ)
+        return _lowest_dense(H, n_occ)
+    if solver == "sparse":
+        raise ValueError("solver='sparse' supports orthogonal models "
+                         "only (the Loewdin map is dense)")
     w, V = eigh(S)
     if w.min() <= 1e-10:
         raise ValueError(
@@ -97,66 +135,138 @@ def _occ_states(model, k, n_occ):
     return d
 
 
-def berry_phase(model, kpts, n_occ=1):
+def _occ_states_atomic(model, k, n_occ, solver="dense"):
+    """Occupied eigenvectors at k in the atomic gauge, S-normalized --
+    the same assembly every other observable uses."""
+    H, S = model.bloch(k)
+    if not model.has_overlap():
+        if solver == "sparse":
+            return _lowest_sparse(H, n_occ)
+        return _lowest_dense(H, n_occ)
+    if solver == "sparse":
+        raise ValueError("solver='sparse' supports orthogonal models "
+                         "only")
+    _, c = gen_eigh(H, S, eigvals_only=False)
+    return c[:, :n_occ]
+
+
+def _get_states(model, k, n_occ, frame, solver):
+    if frame == "lowdin":
+        return _occ_states(model, k, n_occ, solver)
+    if frame == "atomic":
+        return _occ_states_atomic(model, k, n_occ, solver)
+    raise ValueError("frame must be 'lowdin' or 'atomic'")
+
+
+def _link(model, frame, k_from, s_from, k_to, s_to):
+    """Normalized determinant link between occupied frames.  In the
+    atomic frame with overlap, the inner product carries S at the bond
+    midpoint -- the discrete metric implied by the site-diagonal
+    position operator."""
+    if frame == "atomic" and model.has_overlap():
+        km = 0.5 * (np.asarray(k_from, dtype=float)
+                    + np.asarray(k_to, dtype=float))
+        _, Smid = model.bloch(km)
+        d = np.linalg.det(s_from.conj().T @ Smid @ s_to)
+    else:
+        d = np.linalg.det(s_from.conj().T @ s_to)
+    if abs(d) < 1e-12:
+        raise ValueError("vanishing link overlap; refine the grid")
+    return d / abs(d)
+
+
+def berry_phase(model, kpts, n_occ=1, frame="lowdin", closure=None,
+                solver="dense"):
     """Berry (Wilson-loop) phase of the lowest ``n_occ`` bands along a
     closed loop of k-points.
 
     kpts: sequence of Cartesian k-points tracing the loop *without*
-    repeating the start point; closure is applied automatically in the
-    periodic gauge.  Returns the phase in (-pi, pi].  For a
+    repeating the start point.  closure: the reciprocal vector by which
+    the loop wraps the zone (e.g. b1 for a Zak loop); None means the
+    loop is literally closed.  In the periodic Loewdin frame a wrap by
+    a reciprocal vector is the identity, so closure may be omitted
+    there; in the atomic frame it must be given, because
+    H(k + G) != H(k).  Returns the phase in (-pi, pi].  For a
     one-dimensional model, a loop of evenly spaced points spanning one
-    reciprocal period gives the Zak phase (origin-convention dependent;
-    see the module docstring).
+    reciprocal period gives the Zak phase (origin- and
+    frame-convention dependent; see the module docstring).
     """
-    states = [_occ_states(model, k, n_occ) for k in kpts]
-    states.append(states[0])
+    kpts = [np.atleast_1d(np.asarray(k, dtype=float)) for k in kpts]
+    states = [_get_states(model, k, n_occ, frame, solver) for k in kpts]
+    if closure is None:
+        k_end = kpts[0]
+        states.append(states[0])
+    else:
+        k_end = kpts[0] + np.atleast_1d(np.asarray(closure, dtype=float))
+        states.append(_get_states(model, k_end, n_occ, frame, solver))
+    klist = kpts + [k_end]
     prod = 1.0 + 0.0j
-    for a, b in zip(states[:-1], states[1:]):
-        d = np.linalg.det(a.conj().T @ b)
-        if abs(d) < 1e-12:
-            raise ValueError("vanishing overlap between neighboring "
-                             "k-points; refine the loop")
-        prod *= d / abs(d)
+    for i in range(len(states) - 1):
+        prod *= _link(model, frame, klist[i], states[i],
+                      klist[i + 1], states[i + 1])
     return float(np.angle(prod))
 
 
-def berry_curvature(model, mesh, n_occ=1):
+def berry_curvature(model, mesh, n_occ=1, frame="lowdin", solver="dense"):
     """Lattice Berry curvature (plaquette fluxes) of the lowest
     ``n_occ`` bands on a mesh x mesh grid of the 2D Brillouin zone.
 
     Returns an (mesh, mesh) array of fluxes in (-pi, pi]; their sum is
-    2 pi times the Chern number.
+    2 pi times the Chern number.  frame and solver as in
+    :func:`berry_phase`; in the atomic frame the wrapped boundary
+    points are evaluated explicitly rather than identified modulo the
+    zone.
     """
     if model.cell is None or model.cell.shape != (2, 2):
         raise ValueError("berry_curvature needs a 2D periodic model")
     N = int(mesh)
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
     b1, b2 = recip[0], recip[1]
-    # periodic gauge: u(k + b) is identified with u(k), so compute the
-    # grid once and index modulo N
-    states = [[_occ_states(model, (i / N) * b1 + (j / N) * b2, n_occ)
+    if frame == "lowdin":
+        # periodic gauge: u(k + b) is identified with u(k); index mod N
+        kg = [[(i / N) * b1 + (j / N) * b2 for j in range(N)]
+              for i in range(N)]
+        st = [[_get_states(model, kg[i][j], n_occ, frame, solver)
                for j in range(N)] for i in range(N)]
 
-    def link(s_from, s_to):
-        d = np.linalg.det(s_from.conj().T @ s_to)
-        if abs(d) < 1e-12:
-            raise ValueError("vanishing link overlap; refine the mesh")
-        return d / abs(d)
+        def K(i, j):
+            return kg[i % N][j % N]
+
+        def S(i, j):
+            return st[i % N][j % N]
+    elif frame == "atomic":
+        kg = [[(i / N) * b1 + (j / N) * b2 for j in range(N + 1)]
+              for i in range(N + 1)]
+        st = [[_get_states(model, kg[i][j], n_occ, frame, solver)
+               for j in range(N + 1)] for i in range(N + 1)]
+
+        def K(i, j):
+            return kg[i][j]
+
+        def S(i, j):
+            return st[i][j]
+    else:
+        raise ValueError("frame must be 'lowdin' or 'atomic'")
 
     F = np.empty((N, N))
     for i in range(N):
         for j in range(N):
-            u1 = link(states[i][j], states[(i + 1) % N][j])
-            u2 = link(states[(i + 1) % N][j], states[(i + 1) % N][(j + 1) % N])
-            u3 = link(states[(i + 1) % N][(j + 1) % N], states[i][(j + 1) % N])
-            u4 = link(states[i][(j + 1) % N], states[i][j])
+            u1 = _link(model, frame, K(i, j), S(i, j),
+                       K(i + 1, j), S(i + 1, j))
+            u2 = _link(model, frame, K(i + 1, j), S(i + 1, j),
+                       K(i + 1, j + 1), S(i + 1, j + 1))
+            u3 = _link(model, frame, K(i + 1, j + 1), S(i + 1, j + 1),
+                       K(i, j + 1), S(i, j + 1))
+            u4 = _link(model, frame, K(i, j + 1), S(i, j + 1),
+                       K(i, j), S(i, j))
             F[i, j] = float(np.angle(u1 * u2 * u3 * u4))
     return F
 
 
-def chern_number(model, mesh=24, n_occ=1):
+def chern_number(model, mesh=24, n_occ=1, frame="lowdin", solver="dense"):
     """Chern number of the lowest ``n_occ`` bands (exact integer of the
     lattice field strength; float returned is integer to numerical
-    rounding, which the tests pin to 1e-12)."""
-    F = berry_curvature(model, mesh, n_occ)
+    rounding, which the tests pin to 1e-12).  The tests also assert
+    that the two frames and the two solvers return the same integer."""
+    F = berry_curvature(model, mesh, n_occ, frame=frame, solver=solver)
     return float(F.sum() / (2.0 * np.pi))
