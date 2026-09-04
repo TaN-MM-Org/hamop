@@ -12,18 +12,24 @@ decoupled from defect count" (code:
 https://github.com/Tanvir-Mahmud-Mahim/mos2-vacancy-optics); this
 package is the general-purpose engine distilled from that pipeline.
 """
+from .berry import berry_curvature, berry_phase, chern_number
+from .device import principal_layers
 from .eigsolve import gen_eigh
-from .kubo import carrier_count, sigma_optical
-from .lattices import chain_lead_blocks, graphene, linear_chain, two_site
+from .kubo import carrier_count, drude_weight, sigma_optical
+from .lattices import (chain_lead_blocks, graphene, haldane,
+                       linear_chain, ssh, two_site)
 from .model import TightBindingModel
 from .negf import sancho_rubio, transmission, transmission_direct
-from .spectrum import band_edges, bands, dos, fermi_level
+from .spectrum import band_edges, bands, dos, fermi_level, k_path
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
-    "bands", "dos", "fermi_level", "band_edges",
-    "sigma_optical", "carrier_count",
+    "bands", "dos", "fermi_level", "band_edges", "k_path",
+    "sigma_optical", "drude_weight", "carrier_count",
+    "berry_phase", "berry_curvature", "chern_number",
     "sancho_rubio", "transmission", "transmission_direct",
-    "linear_chain", "two_site", "graphene", "chain_lead_blocks",
+    "principal_layers",
+    "linear_chain", "two_site", "graphene", "ssh", "haldane",
+    "chain_lead_blocks",
 ]

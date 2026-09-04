@@ -11,7 +11,7 @@ import numpy as np
 
 from .eigsolve import gen_eigh
 
-__all__ = ["bands", "dos", "fermi_level", "band_edges"]
+__all__ = ["bands", "dos", "fermi_level", "band_edges", "k_path"]
 
 KB = 8.617333262e-5  # Boltzmann constant, eV / K (CODATA 2018)
 
@@ -98,3 +98,23 @@ def _grid(model, mesh, kpts, weights):
     if weights is None:
         weights = np.full(len(kpts), 1.0 / len(kpts))
     return kpts, weights
+
+
+def k_path(vertices, n_per_segment=30):
+    """Piecewise-linear path through Cartesian k-space vertices.
+
+    Returns (kpts, distances, tick_distances): the interpolated points
+    (each vertex included once, endpoints inclusive), the cumulative
+    path length per point, and the path length at each vertex -- the
+    usual ingredients of a band-structure plot.
+    """
+    vertices = [np.atleast_1d(np.asarray(v, dtype=float)) for v in vertices]
+    kpts = [vertices[0]]
+    for a, b in zip(vertices[:-1], vertices[1:]):
+        for s in range(1, int(n_per_segment) + 1):
+            kpts.append(a + (b - a) * s / float(n_per_segment))
+    kpts = np.array(kpts)
+    seg = np.linalg.norm(np.diff(kpts, axis=0), axis=1)
+    dists = np.concatenate([[0.0], np.cumsum(seg)])
+    ticks = dists[::int(n_per_segment)]
+    return kpts, dists, ticks

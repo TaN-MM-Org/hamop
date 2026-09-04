@@ -27,17 +27,19 @@ import numpy as np
 
 from .eigsolve import gen_eigh
 
-__all__ = ["sigma_optical", "carrier_count"]
+__all__ = ["sigma_optical", "carrier_count", "drude_weight"]
 
 KB = 8.617333262e-5  # eV / K
 
 
 def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
-                  T=300.0, eta=0.05, direction=0, spin=2, thresh=1e-10):
+                  T=300.0, eta=0.05, direction=0, spin=2, thresh=1e-10,
+                  lineshape="gaussian"):
     """Real part of the optical sheet conductivity, in units of e^2/(4 hbar).
 
     omega: photon energies (eV, > 0).  mu: chemical potential (eV).
-    eta: Gaussian broadening of the energy-conservation delta (eV).
+    eta: broadening of the energy-conservation delta (eV);
+    lineshape: "gaussian" (default) or "lorentzian".
     direction: Cartesian polarization axis.  For a finite system
     (cell=None) the "cell volume" is absent and the result is the
     conductivity times the system area; divide by your geometric area.
@@ -71,8 +73,13 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
         A2 = np.abs(M) ** 2
         mask = dE > 1e-3
         for iw, hw in enumerate(omega):
-            g = np.exp(-0.5 * ((dE - hw) / eta) ** 2) \
-                / (eta * np.sqrt(2.0 * np.pi))
+            if lineshape == "gaussian":
+                g = np.exp(-0.5 * ((dE - hw) / eta) ** 2) \
+                    / (eta * np.sqrt(2.0 * np.pi))
+            elif lineshape == "lorentzian":
+                g = (eta / np.pi) / ((dE - hw) ** 2 + eta ** 2)
+            else:
+                raise ValueError("lineshape must be gaussian or lorentzian")
             sig[iw] += w * (df * A2 * g / np.where(mask, dE, 1.0))[mask].sum()
     # sigma / (e^2 / 4 hbar) = spin * 4 pi / area * sum, M in eV*A, dE in eV
     return sig * spin * 4.0 * np.pi / area
@@ -94,3 +101,43 @@ def carrier_count(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
         x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
         n += w * spin * float((1.0 / (1.0 + np.exp(x))).sum())
     return n
+
+
+def drude_weight(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
+                 direction=0, spin=2, thresh=1e-10):
+    """Intraband (Drude) weight, in units of e^2/(4 hbar) times eV.
+
+    Defined so that the intraband part of the conductivity, in the same
+    units as :func:`sigma_optical`, is sigma_intra(hw) = D delta(hw):
+
+        D = spin * (4 pi / A) * sum_k w_k sum_n |M_nn|^2 (-df/de)|_{e_n},
+
+    with the same nonorthogonal velocity M_nn = <n| dH/dk - e_n dS/dk |n>
+    as the interband formula, so D shares its exact invariance under a
+    shift of the energy zero.  D vanishes for a filled or empty band and
+    is pinned in the tests to the closed form of the half-filled chain,
+    D = 8 spin |t| a  (from (4 pi / a) (a / 2 pi) * integral dk
+    v(k)^2 delta(E(k)) with v = -2 t a sin ka).
+    """
+    if mesh is not None:
+        kpts, weights = model.monkhorst_pack(mesh)
+        area = model.cell_volume
+    elif kpts is not None:
+        if weights is None:
+            weights = np.full(len(kpts), 1.0 / len(kpts))
+        area = model.cell_volume
+    else:
+        if model.cell is not None:
+            raise ValueError("periodic model: give mesh or kpts")
+        kpts, weights, area = [None], [1.0], 1.0
+    D = 0.0
+    for k, w in zip(kpts, weights):
+        H, S = model.bloch(k)
+        dH, dS = model.bloch_derivative(k, direction)
+        e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
+        x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
+        mdfde = 1.0 / (4.0 * KB * T * np.cosh(0.5 * x) ** 2)
+        v_nn = np.real(np.einsum("in,ij,jn->n", c.conj(), dH, c)
+                       - e * np.einsum("in,ij,jn->n", c.conj(), dS, c))
+        D += w * float((v_nn ** 2 * mdfde).sum())
+    return D * spin * 4.0 * np.pi / area
