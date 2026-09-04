@@ -1,7 +1,7 @@
 # hamop
 
 [![Tests](https://github.com/TaN-MM-Org/hamop/actions/workflows/ci.yml/badge.svg)](https://github.com/TaN-MM-Org/hamop/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/hamop?label=PyPI&color=blue)](https://pypi.org/project/hamop/)
+[![PyPI](https://img.shields.io/pypi/v/hamop?label=PyPI&color=blue&cacheSeconds=3600)](https://pypi.org/project/hamop/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22311381-blue)](https://doi.org/10.5281/zenodo.22311381)
 
