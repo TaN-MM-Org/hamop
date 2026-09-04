@@ -1,9 +1,11 @@
 """Topology against its exact anchors: integer Chern quantization on
 the lattice, the known Haldane phase diagram, zero total Chern number,
-and the quantized Zak phase of the SSH chain (whose convention-free
-statement is the pi difference between the two dimerizations)."""
+the quantized Zak phase of the SSH chain (whose convention-free
+statement is the pi difference between the two dimerizations), and the
+same statements in a nonorthogonal basis through the Loewdin frame,
+where the Chern number is invariant because the frame map is a smooth
+bundle isomorphism."""
 import numpy as np
-import pytest
 
 from hamop import (berry_phase, chern_number, haldane, linear_chain, ssh)
 
@@ -52,6 +54,32 @@ def test_ssh_zak_phase_is_quantized_and_dimerizations_differ_by_pi():
     assert abs(d - np.pi) < 1e-9
 
 
-def test_berry_refuses_nonorthogonal_models():
-    with pytest.raises(ValueError):
-        _zak(linear_chain(t=-1.0, s=0.2), a=1.0)
+def test_chern_number_survives_a_nonorthogonal_basis():
+    """A small real overlap deforms the Haldane bands smoothly without
+    closing the gap, so the Chern number computed in the Loewdin frame
+    must be the same exact integer as at s = 0 -- in both phases."""
+    for s in (0.05, 0.1):
+        C = chern_number(haldane(t1=-1.0, t2=0.1, phi=np.pi / 2, s=s),
+                         mesh=18)
+        assert abs(C - 1.0) < 1e-12
+    C = chern_number(haldane(t1=-1.0, t2=0.1, phi=np.pi / 2, m_ab=0.9,
+                             s=0.1), mesh=18)
+    assert abs(C) < 1e-12
+
+
+def test_ssh_zak_quantization_survives_a_nonorthogonal_basis():
+    """The bond overlap preserves inversion symmetry, so the Zak phase
+    stays quantized and the two dimerizations still differ by pi."""
+    z1 = _zak(ssh(t1=-1.0, t2=-0.6, s=0.1))
+    z2 = _zak(ssh(t1=-0.6, t2=-1.0, s=0.1))
+    for z in (z1, z2):
+        q = min(abs(z) % np.pi, np.pi - abs(z) % np.pi)
+        assert q < 1e-9
+    d = abs(z1 - z2) % (2.0 * np.pi)
+    assert abs(d - np.pi) < 1e-9
+
+
+def test_zak_phase_of_the_nonorthogonal_chain_is_quantized():
+    z = _zak(linear_chain(t=-1.0, s=0.2), a=1.0)
+    q = min(abs(z) % np.pi, np.pi - abs(z) % np.pi)
+    assert q < 1e-9
