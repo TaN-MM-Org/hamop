@@ -94,14 +94,108 @@ def test_kpm_stochastic_trace_agrees_with_deterministic():
     assert abs(rho_sto[i0] - rho_det[i0]) / rho_det[i0] < 0.25
 
 
-def test_kpm_refuses_periodic_and_nonorthogonal_models():
+def test_kpm_refuses_periodic_models():
     E = np.array([0.0])
     with pytest.raises(ValueError):
         kpm_dos(linear_chain(), E)
-    with pytest.raises(ValueError):
-        kpm_dos(_open_chain(10, s=0.2), E)
 
 
 def test_lowest_bands_refuses_full_spectrum_request():
     with pytest.raises(ValueError):
         lowest_bands(_open_chain(10), [None], 10)
+
+
+# ----------------------------------------------------------------------
+# nonorthogonal KPM, sparse velocity, KPM optical conductivity
+
+def test_sparse_derivative_equals_dense_derivative():
+    from hamop import bloch_derivative_sparse
+    g = graphene()
+    k = np.array([0.31, -0.7])
+    for direction in (0, 1):
+        dHd, _ = g.bloch_derivative(k, direction)
+        dHs, dSs = bloch_derivative_sparse(g, k, direction)
+        assert np.abs(dHs.toarray() - dHd).max() == 0.0
+        assert dSs is None
+    c = linear_chain(s=0.2)
+    dHd, dSd = c.bloch_derivative(np.array([0.4]), 0)
+    dHs, dSs = bloch_derivative_sparse(c, np.array([0.4]), 0)
+    assert np.abs(dHs.toarray() - dHd).max() == 0.0
+    assert np.abs(dSs.toarray() - dSd).max() == 0.0
+
+
+def test_kpm_dos_nonorthogonal_chain_closed_form():
+    """The generalized spectrum E = 2t cos th / (1 + 2s cos th) has
+    dE/dth = -2t at the band center, so the per-site DOS there is
+    1/(2 pi |t|) -- same as the orthogonal chain; and the band ends at
+    2t/(1 +- 2s), outside of which the DOS must vanish."""
+    N, s = 1000, 0.2
+    m = _open_chain(N, s=s)
+    E = np.linspace(-2.0, 4.0, 1201)
+    rho = kpm_dos(m, E, n_moments=300)
+    i0 = int(np.argmin(np.abs(E)))
+    assert abs(rho[i0] / N - 1.0 / (2.0 * np.pi)) * 2.0 * np.pi < 0.01
+    integrate = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    assert abs(integrate(rho, E) - N) / N < 0.005
+    assert rho[E < -1.6].max() == 0.0          # below 2t/(1+2s) = -1.43
+    assert rho[E > 3.6].max() == 0.0           # above 2t/(1-2s) = 3.33
+
+
+def _ssh_chain(n_cells, t1=-1.0, t2=-0.6, a=2.0):
+    pos = []
+    for i in range(n_cells):
+        pos += [[i * a], [i * a + 0.5 * a]]
+    m = TightBindingModel(pos, 1, None)
+    for i in range(2 * n_cells):
+        m.add_hop(i, i, (0,), [[0.0]])
+    for i in range(n_cells):
+        m.add_hop(2 * i, 2 * i + 1, (0,), [[t1]])
+        if i + 1 < n_cells:
+            m.add_hop(2 * i + 1, 2 * i + 2, (0,), [[t2]])
+    return m
+
+
+def test_kpm_sigma_molecule_integrated_weight_closed_form():
+    """The kernel broadens the line but conserves its weight: the
+    integral of Re sigma over the peak is spin 4 pi (a t)^2 / (2|t|),
+    kernel-independent."""
+    from hamop import kpm_sigma, two_site
+    t, a = -0.8, 1.3
+    mol = two_site(t=t, a=a)
+    om = np.linspace(0.8, 2.4, 401)
+    sig = kpm_sigma(mol, om, mu=0.0, n_moments=256, T=10.0)
+    integrate = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    W = integrate(sig, om)
+    expected = 2.0 * 4.0 * np.pi * (a * t) ** 2 / (2.0 * abs(t))
+    assert abs(W - expected) / expected < 0.03
+
+
+def test_kpm_sigma_matches_the_dense_kubo_route():
+    """Same finite dimerized chain through two independent code paths
+    (double-Chebyshev KPM vs dense eigenpair Kubo) in the smooth part
+    of the spectrum."""
+    from hamop import kpm_sigma, sigma_optical
+    ch = _ssh_chain(120)
+    om = np.array([1.9, 2.2, 2.6])
+    sK = kpm_sigma(ch, om, mu=0.0, n_moments=192, T=10.0)
+    sD = sigma_optical(ch, om, mu=0.0, eta=0.04, T=10.0)
+    assert (np.abs(sK - sD) / np.abs(sD)).max() < 0.02
+
+
+def test_kpm_sigma_stochastic_trace_is_consistent():
+    from hamop import kpm_sigma
+    ch = _ssh_chain(120)
+    om = np.array([2.2])
+    sK = kpm_sigma(ch, om, mu=0.0, n_moments=192, T=10.0)
+    sS = kpm_sigma(ch, om, mu=0.0, n_moments=192, T=10.0,
+                   n_random=64, seed=3)
+    assert abs(sS[0] - sK[0]) / abs(sK[0]) < 0.35
+
+
+def test_kpm_sigma_refusals():
+    from hamop import kpm_sigma, linear_chain as lc
+    E = np.array([1.0])
+    with pytest.raises(ValueError):
+        kpm_sigma(lc(), E, mu=0.0)                   # periodic
+    with pytest.raises(ValueError):
+        kpm_sigma(_open_chain(10, s=0.2), E, mu=0.0)  # overlap

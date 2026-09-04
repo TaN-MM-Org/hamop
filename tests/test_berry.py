@@ -83,3 +83,67 @@ def test_zak_phase_of_the_nonorthogonal_chain_is_quantized():
     z = _zak(linear_chain(t=-1.0, s=0.2), a=1.0)
     q = min(abs(z) % np.pi, np.pi - abs(z) % np.pi)
     assert q < 1e-9
+
+
+# ----------------------------------------------------------------------
+# the atomic frame (beyond the Loewdin convention) and the sparse solver
+
+def test_chern_number_is_frame_independent():
+    """Two genuinely different link conventions -- periodic Loewdin
+    frame vs atomic-gauge links with the midpoint overlap metric --
+    must return the same integer, orthogonal and overlap cases alike."""
+    for s in (None, 0.1):
+        h = haldane(t1=-1.0, t2=0.1, phi=np.pi / 2, s=s)
+        Cl = chern_number(h, mesh=18, frame="lowdin")
+        Ca = chern_number(h, mesh=18, frame="atomic")
+        assert abs(Cl - 1.0) < 1e-12
+        assert abs(Ca - 1.0) < 1e-12
+    Ca = chern_number(haldane(m_ab=0.9, s=0.1), mesh=18, frame="atomic")
+    assert abs(Ca) < 1e-12
+
+
+def _zak_atomic(model, N=60, a=2.0):
+    b = 2.0 * np.pi / a
+    return berry_phase(model, [[i * b / N] for i in range(N)], n_occ=1,
+                       frame="atomic", closure=[b])
+
+
+def test_atomic_frame_zak_carries_the_intracell_position():
+    """Orthogonal SSH with sites at 0 and a/2: the atomic frame adds
+    the intracell-position contribution (the occupied band sits with
+    equal weight on both sites, mean position a/4 per site pair), so
+    the two dimerizations give -/+ pi/2 -- still differing by exactly
+    pi, with inversion mapping one onto minus the other."""
+    z1 = _zak_atomic(ssh(t1=-1.0, t2=-0.6))
+    z2 = _zak_atomic(ssh(t1=-0.6, t2=-1.0))
+    assert abs(abs(z1) - np.pi / 2) < 1e-9
+    assert abs(z1 + z2) < 1e-9                    # inversion antisymmetry
+    assert abs(abs(z1 - z2) % (2 * np.pi) - np.pi) < 1e-9
+
+
+def test_atomic_frame_zak_inversion_antisymmetry_with_overlap():
+    """With overlap the atomic-frame Zak values are no longer
+    quantized (the frame convention differs), but inversion still maps
+    the two dimerizations onto opposite phases -- the frame-robust
+    statement, asserted here."""
+    z1 = _zak_atomic(ssh(t1=-1.0, t2=-0.6, s=0.1))
+    z2 = _zak_atomic(ssh(t1=-0.6, t2=-1.0, s=0.1))
+    assert abs(z1 + z2) < 1e-9
+
+
+def test_sparse_solver_returns_the_same_integers():
+    from hamop import kane_mele, with_spin
+    hh = with_spin(haldane(t1=-1.0, t2=0.1, phi=np.pi / 2))
+    Cd = chern_number(hh, mesh=18, n_occ=2, solver="dense")
+    Cs = chern_number(hh, mesh=18, n_occ=2, solver="sparse")
+    assert abs(Cd - 2.0) < 1e-12 and abs(Cs - 2.0) < 1e-12
+    km = kane_mele(lam_so=0.06)
+    assert abs(chern_number(km, mesh=18, n_occ=2, solver="sparse")) < 1e-12
+
+
+def test_sparse_solver_refusals():
+    import pytest
+    with pytest.raises(ValueError):
+        chern_number(haldane(), mesh=6, solver="sparse")     # nao too small
+    with pytest.raises(ValueError):
+        chern_number(haldane(s=0.1), mesh=6, solver="sparse")  # overlap

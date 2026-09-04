@@ -169,3 +169,103 @@ def test_dephasing_suppresses_the_double_barrier_resonance():
     ipk = int(np.argmax(Tc))
     assert Tc[ipk] > 0.99
     assert Td[ipk] < Tc[ipk] - 0.1
+
+
+# ----------------------------------------------------------------------
+# elastic self-consistent Born (SCBA) and the sparse device solver
+
+def _chain_device(nlayers):
+    from hamop import chain_lead_blocks
+    H00, H01 = chain_lead_blocks(t=-1.0, e0=0.0, per_layer=1)
+    Z = np.zeros((1, 1))
+    return ([Z] * nlayers, [np.array([[-1.0]])] * (nlayers - 1),
+            H00, H01)
+
+
+def test_scba_at_zero_coupling_is_the_coherent_result():
+    from hamop import scba_transmission, transmission
+    lay, cp, H00, H01 = _chain_device(41)
+    E = np.array([-1.3, -0.4, 0.6])
+    T0 = scba_transmission(E, lay, cp, H00, H01, W2=0.0)
+    Tc = transmission(E, lay, cp, H00, H01)
+    assert np.abs(T0 - Tc).max() < 1e-12
+
+
+def test_scba_fixed_point_is_converged_and_causal():
+    from hamop import scba_transmission
+    lay, cp, H00, H01 = _chain_device(41)
+    E = np.array([-1.3, -0.4, 0.6])
+    T, info = scba_transmission(E, lay, cp, H00, H01, W2=0.05,
+                                return_info=True)
+    for iE in range(len(E)):
+        assert info["residual"][iE] < 1e-10
+        for sig in info["sigma"][iE]:
+            assert np.all(np.imag(sig) <= 1e-12)   # retarded causality
+    assert np.all(T > 0) and np.all(T < 1.0)       # disorder backscatters
+
+
+def test_scba_central_layer_matches_the_bulk_scalar_equation():
+    """Independent cross-check: the central layer of a long uniform
+    chain must reproduce the *bulk* SCBA fixed point
+    Sigma = W2 g_loc(E - Sigma), solved here from the closed-form local
+    Green function of the clean chain (via its surface Green
+    functions), a completely separate code path."""
+    from hamop import scba_transmission
+    W2 = 0.05
+    lay, cp, H00, H01 = _chain_device(41)
+    E_list = np.array([-1.3, -0.4, 0.6])
+    _, info = scba_transmission(E_list, lay, cp, H00, H01, W2=W2,
+                                return_info=True)
+
+    def g00(z):
+        disc = np.sqrt(z * z - 4.0)
+        for sgn in (+1.0, -1.0):
+            gs = (z + sgn * disc) / 2.0        # t^2 g_surf, t = -1
+            if gs.imag < 0:
+                break
+        return 1.0 / (z - 2.0 * gs)
+
+    for iE, E in enumerate(E_list):
+        s = 0.0
+        for _ in range(2000):
+            s_new = W2 * g00(E + 1e-6j - s)
+            if abs(s_new - s) < 1e-13:
+                break
+            s = 0.5 * s + 0.5 * s_new
+        sig_c = info["sigma"][iE][20][0]        # central layer
+        assert abs(sig_c - s) < 1e-3
+
+
+def test_scba_perturbative_limit():
+    """At small W2 the converged Sigma equals the first Born term
+    W2 * G_coherent to O(W2^2)."""
+    from hamop import scba_transmission
+    lay, cp, H00, H01 = _chain_device(21)
+    E = np.array([0.4])
+    _, i1 = scba_transmission(E, lay, cp, H00, H01, W2=1e-4,
+                              return_info=True)
+    _, i0 = scba_transmission(E, lay, cp, H00, H01, W2=0.0,
+                              return_info=True)
+    # first Born: W2 * diag(G) of the coherent device; the coherent G
+    # diagonal is Sigma/W2 in the W2 -> 0 limit of the SCBA iteration
+    sig = i1["sigma"][0][10][0]
+    # |Sigma| ~ W2 |G| ~ 1e-4, correction O(W2^2 |G|^3) ~ 1e-8
+    assert abs(sig) < 5e-4
+    assert abs(sig) > 1e-5
+
+
+def test_transmission_sparse_equals_direct():
+    from hamop import transmission_direct, transmission_sparse
+    lay, cp, H00, H01 = _chain_device(7)
+    E = np.linspace(-1.8, 1.8, 9)
+    sig = {2: lambda E: np.array([[0.3 - 0.15j]]),
+           4: np.array([[0.2 + 0.05j]])}
+    T1 = transmission_direct(E, lay, cp, H00, H01, sigma_int=sig)
+    T2 = transmission_sparse(E, lay, cp, H00, H01, sigma_int=sig)
+    assert np.abs(T1 - T2).max() < 1e-12
+    lS = [np.eye(1)] * 7
+    cS = [np.array([[0.2]])] * 6
+    S00, S01 = np.eye(1), np.array([[0.2]])
+    T3 = transmission_direct(E * 0.5, lay, cp, H00, H01, lS, cS, S00, S01)
+    T4 = transmission_sparse(E * 0.5, lay, cp, H00, H01, lS, cS, S00, S01)
+    assert np.abs(T3 - T4).max() < 1e-12

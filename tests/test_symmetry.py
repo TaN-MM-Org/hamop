@@ -46,3 +46,60 @@ def test_complex_blocks_are_refused():
     and the fold must be refused, not silently averaged."""
     with pytest.raises(ValueError):
         haldane().monkhorst_pack(12, time_reversal=True)
+
+
+# ----------------------------------------------------------------------
+# point-group folding (self-verified)
+
+def test_c6_fold_of_graphene_reproduces_spectral_observables():
+    from hamop import fermi_level, symmetry_fold
+    g = graphene()
+    c, s = np.cos(np.pi / 3), np.sin(np.pi / 3)
+    R6 = np.array([[c, -s], [s, c]])
+    k1, w1 = g.monkhorst_pack(24)
+    k2, w2 = symmetry_fold(g, 24, [R6], time_reversal=True)
+    assert abs(w2.sum() - 1.0) < 1e-12
+    assert len(k2) < len(k1) / 5          # ~ x6 reduction
+    E = np.array([0.5, 1.0, 2.0])
+    assert np.abs(dos(g, E, kpts=k1, weights=w1)
+                  - dos(g, E, kpts=k2, weights=w2)).max() < 1e-12
+    mu1 = fermi_level(g, 1.0, kpts=k1, weights=w1)
+    mu2 = fermi_level(g, 1.0, kpts=k2, weights=w2)
+    assert abs(mu1 - mu2) < 1e-9
+
+
+def test_fold_works_for_the_time_reversal_broken_haldane_model():
+    """Haldane breaks time reversal but keeps C6 spectral symmetry
+    (sublattice-exchanging rotation); the spectral check must accept
+    it and the folded DOS must be exact."""
+    from hamop import symmetry_fold
+    c, s = np.cos(np.pi / 3), np.sin(np.pi / 3)
+    R6 = np.array([[c, -s], [s, c]])
+    h = haldane()
+    k, w = symmetry_fold(h, 12, [R6])
+    E = np.array([0.5, 1.0, 2.0])
+    assert np.abs(dos(h, E, mesh=12)
+                  - dos(h, E, kpts=k, weights=w)).max() < 1e-12
+
+
+def test_non_symmetry_operations_are_refused():
+    from hamop import symmetry_fold
+    g = graphene()
+    R4 = np.array([[0.0, -1.0], [1.0, 0.0]])   # 90 deg: not hexagonal
+    with pytest.raises(ValueError):
+        symmetry_fold(g, 24, [R4])
+    # a lattice symmetry that the Hamiltonian breaks must also be
+    # refused: stretch one of the three graphene bonds (anisotropic
+    # hopping), which the spectral check catches even though C6 still
+    # maps the lattice to itself
+    from hamop import TightBindingModel
+    a = 2.46
+    cell = a * np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
+    pos = np.array([np.zeros(2), (cell[0] + cell[1]) / 3.0])
+    m = TightBindingModel(positions=pos, norb=1, cell=cell)
+    m.add_hop(0, 1, (0, 0), [[-3.4]])          # one bond different
+    m.add_hop(0, 1, (-1, 0), [[-2.7]])
+    m.add_hop(0, 1, (0, -1), [[-2.7]])
+    c6, s6 = np.cos(np.pi / 3), np.sin(np.pi / 3)
+    with pytest.raises(ValueError):
+        symmetry_fold(m, 12, [np.array([[c6, -s6], [s6, c6]])])
