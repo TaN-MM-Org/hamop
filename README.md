@@ -114,6 +114,10 @@ atomistic position gauge (position operator diagonal at the sites);
 the intra-atomic dipole contribution is neglected, the common
 approximation in tight-binding optics.
 
+## Relation to existing tools
+
+Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.edu/pythtb/) and [pybinding](https://docs.pybinding.site/) build tight-binding models and their spectra, and [Kwant](https://kwant-project.org/) is the standard for quantum transport. hamop does not replace any of them, and for their core use cases they are more capable. Its niche is the combination they leave open: nonorthogonal (LCAO-style) overlap matrices as first-class citizens across *all* observables, optics and transport computed from the same Bloch assembly as the spectrum so the three can never disagree, and a deliberately small NumPy/SciPy-only core validated line by line against closed forms -- the shape of engine an LCAO electronic-structure pipeline exports its Hamiltonians into.
+
 ## Status
 
 v0.1.0 (alpha). Implemented and tested: the model container with exact
