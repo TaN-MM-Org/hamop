@@ -5,7 +5,11 @@ authors:
   - family-names: Mahim
     given-names: Tanvir M.
     orcid: "https://orcid.org/0000-0002-4550-3248"
-version: 0.1.1
+version: 0.2.0
 date-released: 2026-09-04
 license: Apache-2.0
 repository-code: "https://github.com/TaN-MM-Org/hamop"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.22311381
+    description: "Concept DOI for all versions; resolves to the latest release"

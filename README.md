@@ -3,6 +3,7 @@
 [![Tests](https://github.com/TaN-MM-Org/hamop/actions/workflows/ci.yml/badge.svg)](https://github.com/TaN-MM-Org/hamop/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/hamop?label=PyPI&color=blue)](https://pypi.org/project/hamop/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22311381-blue)](https://doi.org/10.5281/zenodo.22311381)
 
 **One tight-binding Hamiltonian, every observable, strictly
 consistent.** Build a Hamiltonian once, as real-space blocks in an
@@ -28,19 +29,30 @@ cannot disagree with each other.
   blocks (LCAO-style nonorthogonal bases), periodic in any dimension or
   finite. Assembles H(k), S(k) and their exact k-derivatives in the
   atomic gauge.
-- **Spectrum** (`bands`, `dos`, `fermi_level`, `band_edges`): band
-  structures along arbitrary k-lists, Gaussian-broadened densities of
-  states, chemical potential at a given filling by bisection, band
-  edges and gap about a chemical potential.
-- **Optics** (`sigma_optical`): Kubo-Greenwood real sheet conductivity
-  in units of e²/(4ℏ), with the nonorthogonal velocity correction
-  `v = dH/dk − (eₙ+eₘ)/2 dS/dk` that makes the result exactly
-  invariant under a shift of the energy zero.
+- **Spectrum** (`bands`, `dos`, `fermi_level`, `band_edges`,
+  `k_path`): band structures along arbitrary k-lists or interpolated
+  high-symmetry paths, Gaussian-broadened densities of states, chemical
+  potential at a given filling by bisection, band edges and gap about a
+  chemical potential.
+- **Optics** (`sigma_optical`, `drude_weight`): Kubo-Greenwood real
+  sheet conductivity in units of e²/(4ℏ) with Gaussian or Lorentzian
+  broadening, plus the intraband (Drude) weight — both built on the
+  nonorthogonal velocity correction
+  `v = dH/dk − (eₙ+eₘ)/2 dS/dk` that makes them exactly invariant
+  under a shift of the energy zero.
+- **Topology** (`berry_phase`, `berry_curvature`, `chern_number`):
+  Wilson-loop Berry phases and the gauge-invariant lattice field
+  strength of Fukui, Hatsugai and Suzuki (J. Phys. Soc. Jpn. 74, 1674
+  (2005)), whose Brillouin-zone sum is an exact integer — the Chern
+  number. Orthogonal bases only for now, refused explicitly otherwise.
 - **Transport** (`sancho_rubio`, `transmission`,
-  `transmission_direct`): two-probe Landauer transmission with
-  Sancho-Rubio lead surface Green functions and a recursive Green
-  function sweep, nonorthogonal bases included, plus a dense
-  direct-inversion reference implementation of the same quantity.
+  `transmission_direct`, `principal_layers`): two-probe Landauer
+  transmission with Sancho-Rubio lead surface Green functions and a
+  recursive Green function sweep, nonorthogonal bases included, plus a
+  dense direct-inversion reference implementation of the same quantity
+  — and automatic partitioning of a finite model into principal
+  layers, which *verifies* that no coupling skips a layer instead of
+  silently truncating it.
 - **`gen_eigh`**: generalized eigensolver with canonical
   orthogonalization (Szabo and Ostlund, *Modern Quantum Chemistry*,
   sec. 3.4.5), so mildly overcomplete overlaps cannot blow up the
@@ -74,7 +86,19 @@ exact result, not a stored number:
   transmit two; an on-site impurity ε reproduces
   T = (4t² − E²)/((4t² − E²) + ε²);
 - the recursive Green function sweep agrees with dense direct inversion
-  to machine precision, disorder and overlap included.
+  to machine precision, disorder and overlap included;
+- the Haldane model returns its known phase diagram (Haldane, Phys.
+  Rev. Lett. 61, 2015 (1988)) with the Chern number an **exact integer
+  to 10⁻¹²**: ±1 inside the topological phase, 0 outside, sign
+  reversal with the flux direction, and zero total over all bands;
+- the SSH chain's Zak phase is quantized to 0 or π and the two
+  dimerizations differ by exactly π — the convention-free statement;
+- the Drude weight of the half-filled chain reproduces its closed form
+  8·spin·|t|·a and is exactly invariant under a shift of the energy
+  zero in a nonorthogonal basis;
+- the automatic principal-layer partition reproduces hand-built blocks
+  exactly, reproduces the single-impurity closed form end to end, and
+  refuses a layer width smaller than the interaction range.
 
 Run them yourself: `pip install -e .[test]` then `pytest`.
 
@@ -120,20 +144,24 @@ Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.
 
 ## Status
 
-v0.1.0 (alpha). Implemented and tested: the model container with exact
+v0.2.0 (alpha). Implemented and tested: the model container with exact
 k-derivatives, canonical-orthogonalization eigensolver, band
-structures, densities of states, filling-resolved chemical potentials,
-band edges, Kubo-Greenwood optical conductivity for periodic and finite
-systems, Sancho-Rubio surface Green functions, and recursive plus
-direct-inversion Landauer transmission.
+structures and k-paths, densities of states, filling-resolved chemical
+potentials, band edges, Kubo-Greenwood optical conductivity (Gaussian
+or Lorentzian broadening) and the intraband Drude weight for periodic
+and finite systems, Wilson-loop Berry phases, lattice Berry curvature
+and Chern numbers, Sancho-Rubio surface Green functions, recursive
+plus direct-inversion Landauer transmission, and verified automatic
+principal-layer partitioning.
 
 Not yet implemented, stated plainly: k-space symmetry reduction (grids
-are full Monkhorst-Pack), Lorentzian and adaptive broadenings, the
-Drude (intraband) term of the conductivity, spin-orbit-coupled blocks
-as a first-class convention (complex blocks work, but no helper),
-Hall/off-diagonal conductivity tensors, and interaction self-energies
-in the transport module. Sparse or very large models are out of scope
-for now: matrices are dense.
+are full Monkhorst-Pack), Berry phases in nonorthogonal bases (refused
+with an explicit error), the finite-frequency Hall conductivity
+σ_xy(ω) (the Chern number is implemented; the full Hall spectrum is
+not), spin-orbit-coupled blocks as a first-class convention (complex
+blocks work, but no helper), and interaction self-energies in the
+transport module. Sparse or very large models are out of scope for
+now: matrices are dense.
 
 ## Where it comes from
 
@@ -180,4 +208,7 @@ oversight.
 ## License
 
 Apache-2.0 (see [LICENSE](LICENSE)). Citation metadata is in
-[CITATION.cff](CITATION.cff).
+[CITATION.cff](CITATION.cff); every release is archived on Zenodo
+under the concept DOI
+[10.5281/zenodo.22311381](https://doi.org/10.5281/zenodo.22311381),
+which always resolves to the latest version.
