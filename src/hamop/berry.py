@@ -57,7 +57,8 @@ from scipy.linalg import eigh
 
 from .eigsolve import gen_eigh
 
-__all__ = ["berry_phase", "chern_number", "berry_curvature"]
+__all__ = ["berry_phase", "chern_number", "berry_curvature",
+           "chern_marker"]
 
 
 def _bloch_periodic(model, k):
@@ -270,3 +271,42 @@ def chern_number(model, mesh=24, n_occ=1, frame="lowdin", solver="dense"):
     that the two frames and the two solvers return the same integer."""
     F = berry_curvature(model, mesh, n_occ, frame=frame, solver=solver)
     return float(F.sum() / (2.0 * np.pi))
+
+
+def chern_marker(model, mu, thresh=1e-10):
+    """Local (real-space) Chern marker of a *finite* 2D model: the
+    per-site array m_i = 4 pi Im [P x Q y P]_ii (Angstrom^2), following
+    R. Bianco and R. Resta, Phys. Rev. B 84, 241106(R) (2011), with P
+    the projector on states below mu, Q = 1 - P, and x, y the
+    site-diagonal position operators.
+
+    Summed over a bulk region and divided by that region's area, the
+    marker estimates the Chern number of the underlying periodic
+    system; summed over the *whole* finite system it vanishes exactly
+    (Im Tr[P x Q y] = 0 identically -- the same identity that makes a
+    bounded system's DC Hall response zero), the bulk value being
+    compensated at the edges.  Both statements are asserted in the
+    tests against the package's chern_number on the periodic Haldane
+    model, and the sign convention here is fixed by that agreement
+    (which in turn is pinned to sigma_xy = C e^2/h by the TKNN test).
+
+    Orthogonal bases only (the projector construction assumes an
+    orthonormal site basis); overlap models are refused.
+    """
+    if model.cell is not None:
+        raise ValueError("chern_marker works on finite models; use "
+                         "chern_number for periodic ones")
+    if model.has_overlap():
+        raise ValueError("chern_marker supports orthogonal bases only")
+    if model.positions.shape[1] < 2:
+        raise ValueError("chern_marker needs two dimensions")
+    H, _ = model.bloch(None)
+    e, c = eigh(H)
+    occ = c[:, e < mu]
+    P = occ @ occ.conj().T
+    Q = np.eye(len(H), dtype=complex) - P
+    # orbital positions (site position repeated per orbital)
+    xpos = np.repeat(model.positions[:, 0], model.norb)
+    ypos = np.repeat(model.positions[:, 1], model.norb)
+    M = P @ (xpos[:, None] * (Q @ (ypos[:, None] * P)))
+    return 4.0 * np.pi * np.imag(np.diag(M))

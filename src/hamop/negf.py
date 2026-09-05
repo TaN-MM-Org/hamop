@@ -27,7 +27,7 @@ import numpy as np
 
 __all__ = ["sancho_rubio", "transmission", "transmission_direct",
            "buttiker_transmission", "scba_transmission",
-           "transmission_sparse"]
+           "transmission_sparse", "multiprobe_transmission"]
 
 
 def _sigma_at(sigma_int, i, E, n):
@@ -407,3 +407,85 @@ def transmission_sparse(E_list, layers_H, coup_H, lead_H00, lead_H01,
         T[iE] = float(np.real(np.trace(
             gamR @ G1N @ gamL @ G1N.conj().T)))
     return T
+
+
+def multiprobe_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
+                            gamma, probe_layers=None, layers_S=None,
+                            coup_S=None, lead_S00=None, lead_S01=None,
+                            eta=1e-6, return_parts=False):
+    """Two-terminal conductance with current-conserving dephasing
+    probes on many layers -- the D'Amato-Pastawski model (J. L. D'Amato
+    and H. M. Pastawski, Phys. Rev. B 41, 7411 (1990)).
+
+    Each probe layer carries the self-energy -i gamma / 2 per orbital;
+    all pairwise Caroli transmissions between {left lead, right lead,
+    probes} are computed from one dense Green function, and the probe
+    chemical potentials are solved from exact linear-response current
+    conservation (zero net current into every probe).  Returns the
+    effective transmission T_eff = I_L / (V_L - V_R).
+
+    probe_layers: iterable of layer indices (default: every layer).
+    Anchors in the tests: gamma = 0 recovers the coherent result; a
+    single probe equals :func:`buttiker_transmission` to machine
+    precision; the total current is conserved to machine precision;
+    and uniform dephasing produces the Ohmic (linear-in-length)
+    resistance of the model's namesake paper.
+    """
+    N = len(layers_H)
+    layers_S = [None] * N if layers_S is None else layers_S
+    coup_S = [None] * (N - 1) if coup_S is None else coup_S
+    probes = list(range(N)) if probe_layers is None else \
+        sorted(int(x) for x in probe_layers)
+    if any(not 0 <= x < N for x in probes):
+        raise ValueError("probe layer outside the device")
+    sizes = [len(h) for h in layers_H]
+    T_eff = np.zeros(len(E_list))
+    parts = []
+    for iE, E in enumerate(E_list):
+        sigL, sigR, gamL, gamR = _lead_sigmas(
+            E, lead_H00, lead_H01, lead_S00, lead_S01, eta)
+        A, offs = _assemble_device(E, layers_H, coup_H, layers_S,
+                                   coup_S, eta)
+        A[offs[0]:offs[1], offs[0]:offs[1]] -= sigL
+        A[offs[N - 1]:offs[N], offs[N - 1]:offs[N]] -= sigR
+        for pL in probes:
+            idx = np.arange(offs[pL], offs[pL + 1])
+            A[idx, idx] += 0.5j * gamma
+        G = np.linalg.inv(A)
+        # terminals: 0 = L, 1 = R, 2.. = probes
+        gams = [gamL, gamR] + [gamma * np.eye(sizes[pL]) for pL in probes]
+        blocks = [(offs[0], offs[1]), (offs[N - 1], offs[N])] + \
+            [(offs[pL], offs[pL + 1]) for pL in probes]
+        nt = len(gams)
+        T = np.zeros((nt, nt))
+        for a in range(nt):
+            ra = slice(*blocks[a])
+            for b in range(nt):
+                if a == b:
+                    continue
+                rb = slice(*blocks[b])
+                Gab = G[ra, rb]
+                T[a, b] = float(np.real(np.trace(
+                    gams[a] @ Gab @ gams[b] @ Gab.conj().T)))
+        # linear response: I_a = sum_b T_ab (V_a - V_b); V_L = 1, V_R = 0,
+        # probes float with I_p = 0
+        np_probe = nt - 2
+        if np_probe == 0 or gamma == 0.0:
+            T_eff[iE] = T[0, 1]
+            parts.append({"T": T, "V": np.array([1.0, 0.0])})
+            continue
+        M = np.zeros((np_probe, np_probe))
+        rhs = np.zeros(np_probe)
+        for ip in range(np_probe):
+            a = ip + 2
+            M[ip, ip] = T[a].sum()
+            for jp in range(np_probe):
+                if jp != ip:
+                    M[ip, jp] = -T[a, jp + 2]
+            rhs[ip] = T[a, 0] * 1.0 + T[a, 1] * 0.0
+        Vp = np.linalg.solve(M, rhs)
+        V = np.concatenate([[1.0, 0.0], Vp])
+        I_L = float(sum(T[0, b] * (V[0] - V[b]) for b in range(nt)))
+        T_eff[iE] = I_L
+        parts.append({"T": T, "V": V})
+    return (T_eff, parts) if return_parts else T_eff

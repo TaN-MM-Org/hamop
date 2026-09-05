@@ -15,13 +15,21 @@ H. Fehske, Rev. Mod. Phys. 78, 275 (2006) -- with either an exact
 ``kpm_sigma`` extends the same machinery to the Kubo-Greenwood optical
 conductivity through the double Chebyshev expansion of the
 velocity-velocity spectral density (same reference, Sec. V), and
-``bloch_derivative_sparse`` supplies the sparse velocity assembly.
-Sparse topology lives in the berry module (solver="sparse") and sparse
-transport in the negf module (transmission_sparse).
+``bloch_derivative_sparse`` supplies the sparse velocity assembly --
+with intra-atomic dipole blocks entering as the exact sparse operator
+i(HX - XH).  Sparse topology lives in the berry module
+(solver="sparse" and the real-space Chern marker) and sparse transport
+in the negf module (transmission_sparse).
 
 Deliberate scope, stated plainly: kpm_sigma covers orthogonal bases
-and the longitudinal response only -- no sparse Hall conductivity, and
-no intra-atomic dipole terms in the sparse velocity.
+and the longitudinal response only.  A KPM *Hall* conductivity of a
+finite open system is not offered for a reason the tests prove rather
+than assert: in the site-diagonal position formulation the DC Hall
+response of any bounded system vanishes identically
+(Im Tr[P x Q y] = 0 for Hermitian P and real diagonal x, y), so such
+a routine could only ever return broadening artifacts.  The honest
+real-space Hall observable for finite systems is the local Chern
+marker, :func:`hamop.chern_marker`.
 """
 from __future__ import annotations
 
@@ -31,6 +39,58 @@ from scipy.sparse.linalg import eigsh
 
 __all__ = ["bloch_sparse", "bloch_derivative_sparse", "lowest_bands",
            "kpm_dos", "kpm_sigma"]
+
+
+def _velocity_sparse(model, direction):
+    """Sparse velocity operator (times hbar) of a finite orthogonal
+    model at k = 0: dH/dk in the site-diagonal position convention,
+    plus -- when the model carries dipole blocks -- the exact operator
+    form of the intra-atomic term, i (H X - X H), built by sparse
+    products.  This is the same physics as the dense eigenbasis route
+    i (E_n - E_m) X_nm, expressed without eigenpairs."""
+    from scipy.sparse import csr_matrix
+    v, _ = bloch_derivative_sparse(model, None, direction)
+    if model.has_dipoles():
+        H, _ = bloch_sparse(model, None)
+        X = csr_matrix(model.dipole_matrix(direction))
+        v = v + 1j * (H @ X - X @ H)
+    return v
+
+
+def _vv_moments(H, va, vb, a, b, M, n, n_random, seed):
+    """Complex double Chebyshev moments mu_mn = Tr[T_m(H~) va T_n(H~) vb]
+    of the rescaled Hamiltonian H~ = (H - b)/a, deterministic
+    (n_random=None) or stochastic trace."""
+
+    def cheb_block(V0):
+        out = np.empty((M,) + V0.shape, dtype=complex)
+        v_prev = V0.astype(complex)
+        v_cur = (H @ v_prev - b * v_prev) / a
+        out[0] = v_prev
+        if M > 1:
+            out[1] = v_cur
+        for m in range(2, M):
+            v_next = 2.0 * ((H @ v_cur) - b * v_cur) / a - v_prev
+            out[m] = v_next
+            v_prev, v_cur = v_cur, v_next
+        return out
+
+    if n_random is None:
+        starts = [np.eye(n)]
+        norm = 1.0
+    else:
+        rng = np.random.default_rng(seed)
+        starts = [rng.choice([-1.0, 1.0], size=(n, int(n_random)))]
+        norm = 1.0 / int(n_random)
+    mu_mn = np.zeros((M, M), dtype=complex)
+    for V0 in starts:
+        C = cheb_block(V0)                       # T_m |r>
+        A2 = cheb_block(np.asarray(vb @ V0))     # T_n vb |r>
+        VA = np.stack([np.asarray(va @ A2[m]) for m in range(M)])
+        Cf = C.reshape(M, -1)
+        Vf = VA.reshape(M, -1)
+        mu_mn += norm * (Cf.conj() @ Vf.T)
+    return mu_mn
 
 
 def bloch_sparse(model, k=None):
@@ -266,8 +326,9 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
     peak weight has the kernel-independent closed form
     spin 4 pi (a t)^2 / (2 |t|), and against the dense Kubo route on a
     dimerized chain.  Orthogonal bases and finite models only, refused
-    explicitly otherwise; intra-atomic dipole blocks are not included
-    here (use the dense route for those).
+    explicitly otherwise.  Intra-atomic dipole blocks are included
+    through the exact sparse operator i(HX - XH), anchored on the same
+    atomic line as the dense route.
     """
     if model.cell is not None:
         raise ValueError("kpm_sigma works on finite models; build a "
@@ -279,7 +340,7 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
         raise ValueError("omega must be positive photon energies")
     KB = 8.617333262e-5  # eV / K (CODATA 2018)
     H, _ = bloch_sparse(model, None)
-    v, _ = bloch_derivative_sparse(model, None, direction)
+    v = _velocity_sparse(model, direction)
     n = model.nao
     M = int(n_moments)
     if bounds is None:
@@ -289,36 +350,7 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
     span = float(e_hi - e_lo)
     a = 0.5 * span * (1.0 + margin)
     b = 0.5 * float(e_hi + e_lo)
-
-    def cheb_block(V0):
-        """All T_m(H~) V0, stacked as (M, n, r)."""
-        out = np.empty((M,) + V0.shape, dtype=complex)
-        v_prev = V0.astype(complex)
-        v_cur = (H @ v_prev - b * v_prev) / a
-        out[0] = v_prev
-        if M > 1:
-            out[1] = v_cur
-        for m in range(2, M):
-            v_next = 2.0 * ((H @ v_cur) - b * v_cur) / a - v_prev
-            out[m] = v_next
-            v_prev, v_cur = v_cur, v_next
-        return out
-
-    if n_random is None:
-        starts = [np.eye(n)]
-        norm = 1.0
-    else:
-        rng = np.random.default_rng(seed)
-        starts = [rng.choice([-1.0, 1.0], size=(n, int(n_random)))]
-        norm = 1.0 / int(n_random)
-    mu_mn = np.zeros((M, M))
-    for V0 in starts:
-        C = cheb_block(V0)                     # T_m |r>
-        A2 = cheb_block(np.asarray(v @ V0))    # T_n v |r>
-        VA = np.stack([np.asarray(v @ A2[m]) for m in range(M)])
-        Cf = C.reshape(M, -1)
-        Vf = VA.reshape(M, -1)
-        mu_mn += norm * np.real(Cf.conj() @ Vf.T)
+    mu_mn = np.real(_vv_moments(H, v, v, a, b, M, n, n_random, seed))
     g = _jackson(M)
     pref = (2.0 - (np.arange(M) == 0)) * g
     mu_t = mu_mn * pref[:, None] * pref[None, :]
@@ -347,3 +379,4 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
         integ = getattr(np, "trapezoid", getattr(np, "trapz", None))
         sig[iw] = 4.0 * np.pi * spin * integ(df * rho, Eo) / hw
     return sig
+

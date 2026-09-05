@@ -82,3 +82,78 @@ def with_peierls(model, phi, gauge="landau"):
     for i, X in model._dipoles.items():
         m.set_dipole(i, X)
     return m
+
+
+def magnetic_supercell(model, p, q):
+    """Magnetic supercell of a *periodic 2D* model at rational flux
+    p/q per unit cell (in units of the flux quantum): q cells along the
+    first lattice vector, Peierls phases in the oblique-coordinate
+    Landau gauge theta = 2 pi (p/q) u_mid dv, where (u, v) are the
+    fractional coordinates along (a1, a2).  Around any closed loop the
+    accumulated phase is exactly 2 pi p/q times the enclosed area in
+    unit cells -- the Hofstadter construction.
+
+    The construction is self-validating: for the q-cell supercell to
+    represent the infinite field-threaded lattice, every hopping's
+    phase must be invariant under translation by q a1, which requires
+    p * frac(dv) to be an integer for every hop.  A model where that
+    fails (e.g. sublattice offsets with fractional v, like graphene at
+    p not divisible by 3) is refused with the exact remedy: scale to an
+    equivalent flux (n p)/(n q) that clears the fractions -- same
+    physics, compatible gauge.
+
+    Returns a TightBindingModel with q times the sites and cell
+    [q a1, a2].  Anchors in the tests: p = 0 reproduces exact band
+    folding of the original model; the pi-flux square lattice
+    reproduces its closed form E = +-2|t| sqrt(cos^2 kx + cos^2 ky) to
+    machine precision; there are exactly q magnetic bands per orbital;
+    and the lowest Hofstadter band's Chern number is consistent with
+    sigma_xy(0) on the magnetic cell through the package's own TKNN
+    anchor.
+    """
+    if model.cell is None or model.cell.shape != (2, 2):
+        raise ValueError("magnetic_supercell needs a periodic 2D model")
+    p, q = int(p), int(q)
+    if q < 1:
+        raise ValueError("q must be a positive integer")
+    inv_cell = np.linalg.inv(model.cell)
+    frac_pos = model.positions @ inv_cell           # (u, v) per site
+    # translation-consistency check: p * frac(dv) integer for all hops
+    for i, j, image, Hb, Sb in model._hops:
+        dv = (frac_pos[j][1] + image[1]) - frac_pos[i][1]
+        mismatch = p * dv
+        if abs(mismatch - round(mismatch)) > 1e-9:
+            raise ValueError(
+                "gauge inconsistency: hop with fractional a2-displacement "
+                f"dv = {dv:.6f} gives non-integer p*dv = {mismatch:.6f}; "
+                f"use the equivalent flux ({p}*n)/({q}*n) with n clearing "
+                "the fraction (same physics, compatible gauge)")
+    nsite = len(model.norb)
+    pos_sc, norb_sc = [], []
+    for n in range(q):
+        for s in range(nsite):
+            pos_sc.append(model.positions[s] + n * model.cell[0])
+            norb_sc.append(model.norb[s])
+    cell_sc = np.array([q * model.cell[0], model.cell[1]])
+    sc = TightBindingModel(positions=np.array(pos_sc), norb=norb_sc,
+                           cell=cell_sc)
+    for n in range(q):
+        for i, j, image, Hb, Sb in model._hops:
+            ui = frac_pos[i][0] + n
+            uj = frac_pos[j][0] + n + image[0]
+            dv = (frac_pos[j][1] + image[1]) - frac_pos[i][1]
+            theta = 2.0 * np.pi * (p / q) * 0.5 * (ui + uj) * dv
+            ph = np.exp(1j * theta)
+            n_tgt = n + image[0]
+            img_sc = (n_tgt // q, image[1])
+            onsite = (i == j) and not any(image)
+            if onsite:
+                sc.add_hop(n * nsite + i, n * nsite + j, (0, 0), Hb, Sb)
+            else:
+                sc.add_hop(n * nsite + i, (n_tgt % q) * nsite + j,
+                           img_sc, ph * Hb,
+                           None if Sb is None else ph * Sb)
+    for i, X in model._dipoles.items():
+        for n in range(q):
+            sc.set_dipole(n * nsite + i, X)
+    return sc

@@ -37,14 +37,17 @@ def _dipole_term(model, c, e, direction):
     """Intra-atomic dipole contribution to the velocity matrix element,
     i (E_n - E_m) <n|X_a|m>, from v = (i/hbar)[H, r] with the on-site
     position blocks the model carries.  None when the model has no
-    dipole blocks.  Orthogonal bases only (the overlap generalization
-    of [H, r] is not implemented); refused otherwise."""
+    dipole blocks.
+
+    Nonorthogonal bases are supported: <n|[H, x]|m> = (E_n - E_m)
+    <n|x|m> is an operator identity on the (generalized) eigenstates,
+    the on-site dipole blocks are basis matrix elements <alpha|x|beta>,
+    and the eigenvectors ``c`` are S-normalized -- so the same
+    expression applies verbatim, and it inherits the exact invariance
+    under H -> H + c S with mu -> mu + c (eigenvector-, X- and
+    energy-difference-preserving), which the tests assert."""
     if not model.has_dipoles():
         return None
-    if model.has_overlap():
-        raise ValueError(
-            "intra-atomic dipoles are implemented for orthogonal bases "
-            "only; this model carries overlap blocks")
     Xn = c.conj().T @ model.dipole_matrix(direction) @ c
     return 1j * (e[:, None] - e[None, :]) * Xn
 

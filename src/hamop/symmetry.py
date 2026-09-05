@@ -1,9 +1,11 @@
 """Point-group folding of the Monkhorst-Pack grid, self-verified.
 
 ``symmetry_fold`` reduces a uniform k-grid to one representative per
-orbit of a point group the *user supplies* (there is no automatic
-space-group detection here, stated plainly).  Two checks make a wrong
-group impossible to use silently:
+orbit of a point group, and ``find_point_group`` detects that group
+automatically -- by exact enumeration of the lattice automorphisms
+from the cell's Gram matrix, filtered by the spectral check, so
+nothing is ever asserted about a Hamiltonian that is not verified on
+it.  Two checks make a wrong group impossible to use silently:
 
 1. each operation must map the reciprocal lattice to itself (its
    matrix in the fractional basis must be integer to 1e-9), and
@@ -25,7 +27,7 @@ import numpy as np
 
 from .eigsolve import gen_eigh
 
-__all__ = ["symmetry_fold"]
+__all__ = ["symmetry_fold", "find_point_group"]
 
 
 def _group_closure(mats, max_order=48):
@@ -156,3 +158,67 @@ def symmetry_fold(model, mesh, ops, time_reversal=False, n_check=4,
     kpts = frac @ recip
     weights = np.array([seen[rep] for rep in order], dtype=float) / ntot
     return kpts, weights
+
+
+def find_point_group(model, n_check=4, tol=1e-9, seed=0, thresh=1e-10):
+    """Detect the point group of a periodic model, self-validated.
+
+    Candidate operations are enumerated exactly from the lattice: every
+    integer matrix M sending the cell to vectors with the same Gram
+    matrix (a lattice automorphism) yields a Cartesian orthogonal
+    candidate R; the candidates are then filtered by the same spectral
+    check ``symmetry_fold`` uses, so only operations that provably
+    leave the eigenvalue spectrum invariant at random test k-points
+    are returned.  No table lookup, no external library, and nothing
+    asserted that is not verified on this Hamiltonian.
+
+    Returns the list of Cartesian matrices (identity included), ready
+    to pass to :func:`symmetry_fold`.  The tests pin the group orders
+    of the hexagonal (12) and square (8) lattices and the 1D chain
+    (2), and that folding with the found group reproduces the DOS
+    exactly.
+    """
+    if model.cell is None:
+        raise ValueError("finite system has no point group in k")
+    cell = model.cell
+    dim = cell.shape[0]
+    G = cell @ cell.T                     # lattice Gram matrix
+    lam_min = float(np.linalg.eigvalsh(G).min())
+    # integer vectors m with m G m^T == G_ii, |m| bounded by the metric
+    rows_per_i = []
+    for i in range(dim):
+        bound = int(np.floor(np.sqrt(G[i, i] / lam_min) + 1e-9))
+        cands = []
+        rng_axes = [range(-bound, bound + 1)] * dim
+        grid = np.stack(np.meshgrid(*rng_axes, indexing="ij"),
+                        axis=-1).reshape(-1, dim)
+        for m in grid:
+            if abs(m @ G @ m - G[i, i]) < 1e-9:
+                cands.append(m)
+        rows_per_i.append(cands)
+    ops = []
+    rng = np.random.default_rng(seed)
+    recip = 2.0 * np.pi * np.linalg.inv(cell).T
+    ktest = rng.uniform(-1.0, 1.0, size=(n_check, dim)) @ recip
+    eigs_ref = [gen_eigh(*model.bloch(k), thresh=thresh) for k in ktest]
+
+    def spectral_ok(R):
+        for k, e1 in zip(ktest, eigs_ref):
+            e2 = gen_eigh(*model.bloch(k @ R.T), thresh=thresh)
+            if np.abs(e1 - e2).max() > tol:
+                return False
+        return True
+
+    import itertools
+    for rows in itertools.product(*rows_per_i):
+        M = np.array(rows, dtype=float)
+        if np.abs(M @ G @ M.T - G).max() > 1e-9:
+            continue
+        # new_a_i = M @ cell are the mapped lattice vectors; R is the
+        # Cartesian map with cell @ R.T = M @ cell
+        R = (np.linalg.solve(cell, M @ cell)).T
+        if np.abs(R @ R.T - np.eye(dim)).max() > 1e-9:
+            continue
+        if spectral_ok(R):
+            ops.append(R)
+    return ops
