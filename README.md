@@ -47,25 +47,35 @@ cannot disagree with each other.
   (`model.set_dipole`) add the on-site velocity contribution
   i(Eₙ−Eₘ)X_nm, restoring transitions the site-diagonal position
   approximation leaves dark — validated against a hand-derived atomic
-  s→p line (orthogonal bases only, refused otherwise).
-- **Topology** (`berry_phase`, `berry_curvature`, `chern_number`):
-  Wilson-loop Berry phases and the gauge-invariant lattice field
-  strength of Fukui, Hatsugai and Suzuki (J. Phys. Soc. Jpn. 74, 1674
-  (2005)), whose Brillouin-zone sum is an exact integer — the Chern
-  number. Nonorthogonal bases are handled in *two* conventions: the
-  smooth Löwdin frame d = S(k)^½ c (a bundle isomorphism under which
-  the Chern number is invariant), and the atomic frame, whose links
-  carry the midpoint overlap metric implied by the same site-diagonal
-  position operator the velocity uses. Berry-phase *values* are
-  convention-dependent; the integers must agree between frames and are
-  asserted to. Large cells with few occupied bands can use
-  solver="sparse".
-- **Magnetic fields** (`with_peierls`): uniform out-of-plane fields on
-  finite models by Peierls substitution (Peierls, Z. Phys. 80, 763
-  (1933)); the midpoint line integral is exact for linear gauges, so
-  gauge invariance, ring flux spectra, plaquette fluxes and flux-
-  quantum periodicity all hold to machine precision, not
-  approximately.
+  s→p line, in orthogonal *and* nonorthogonal bases (the eigenstate
+  identity ⟨n|[H,x]|m⟩ = (Eₙ−Eₘ)⟨n|x|m⟩ makes the same expression
+  exact with overlap too).
+- **Topology** (`berry_phase`, `berry_curvature`, `chern_number`,
+  `chern_marker`): Wilson-loop Berry phases and the gauge-invariant
+  lattice field strength of Fukui, Hatsugai and Suzuki (J. Phys. Soc.
+  Jpn. 74, 1674 (2005)), whose Brillouin-zone sum is an exact integer
+  — the Chern number. Nonorthogonal bases are handled in *two*
+  conventions: the smooth Löwdin frame d = S(k)^½ c (a bundle
+  isomorphism under which the Chern number is invariant), and the
+  atomic frame, whose links carry the midpoint overlap metric implied
+  by the same site-diagonal position operator the velocity uses.
+  Berry-phase *values* are convention-dependent; the integers must
+  agree between frames and are asserted to. Large cells with few
+  occupied bands can use solver="sparse". For *finite* systems the
+  Bianco-Resta real-space Chern marker (Phys. Rev. B 84, 241106(R)
+  (2011)) gives the local topological density, its bulk average
+  reproducing the periodic Chern number and its whole-system total
+  vanishing identically.
+- **Magnetic fields** (`with_peierls`, `magnetic_supercell`): uniform
+  out-of-plane fields on finite models by Peierls substitution
+  (Peierls, Z. Phys. 80, 763 (1933)) — the midpoint line integral is
+  exact for linear gauges, so gauge invariance, ring flux spectra,
+  plaquette fluxes and flux-quantum periodicity all hold to machine
+  precision — and, on *periodic* 2D models, Hofstadter magnetic
+  supercells at rational flux p/q with a self-validating gauge check,
+  anchored on exact zero-flux band folding, the π-flux square-lattice
+  closed form, and the TKNN consistency of the lowest Hofstadter
+  band's Chern number with σ_xy on the magnetic cell.
 - **Spin** (`with_spin`, `PAULI`, `kane_mele`): spin doubling as a
   stated convention (spin innermost, blocks tensored with Pauli
   matrices), so Zeeman and intrinsic spin-orbit terms are ordinary
@@ -85,7 +95,11 @@ cannot disagree with each other.
   `scba_transmission` iterates the elastic self-consistent Born
   self-energy for uncorrelated on-site disorder,
   Σᵢ = W² diag(Gᵢᵢ), to a verified fixed point — cross-checked
-  against the independent bulk scalar SCBA equation of the chain.
+  against the independent bulk scalar SCBA equation of the chain — and
+  `multiprobe_transmission` puts current-conserving dephasing probes
+  on many layers (D'Amato and Pastawski, Phys. Rev. B 41, 7411
+  (1990)), solved by exact linear-response current conservation, which
+  reproduces Ohmic (linear-in-length) resistance scaling.
 - **Sparse / large systems** (`bloch_sparse`,
   `bloch_derivative_sparse`, `lowest_bands`, `kpm_dos`, `kpm_sigma`):
   CSR assembly of the identical Bloch matrices and their
@@ -93,18 +107,25 @@ cannot disagree with each other.
   (generalized eigenproblem included), the kernel polynomial method
   for the density of states — nonorthogonal bases included, via a
   sparse LU of S — and the KPM Kubo-Greenwood optical conductivity
-  from the double Chebyshev expansion of the velocity-velocity
-  spectral density (Weisse et al., Rev. Mod. Phys. 78, 275 (2006)),
-  deterministic or stochastic trace.
-- **k-mesh reduction**: `monkhorst_pack(mesh, time_reversal=True)`
-  folds k with −k for k-even observables, roughly halving the work
-  (offered only when every real-space block is real, refused
-  otherwise); `symmetry_fold(model, mesh, ops)` folds by a
-  user-supplied point group, verifying *before* folding both that each
-  operation maps the reciprocal lattice to itself and that it actually
-  leaves the spectrum invariant at random test k-points — a
-  non-symmetry is refused, never silently averaged. Valid for
-  spectral observables (DOS, fillings, band edges), stated plainly.
+  (dipole term included) from the double Chebyshev expansion of the
+  velocity-velocity spectral density (Weisse et al., Rev. Mod. Phys.
+  78, 275 (2006)), deterministic or stochastic trace.
+- **k-mesh reduction** (`monkhorst_pack(..., time_reversal=True)`,
+  `symmetry_fold`, `find_point_group`): the time-reversal fold pairs k
+  with −k for k-even observables (offered only when every real-space
+  block is real); `symmetry_fold` folds by a point group, verifying
+  *before* folding both that each operation maps the reciprocal
+  lattice to itself and that it leaves the spectrum invariant at
+  random test k-points; and `find_point_group` *detects* that group
+  automatically by exact lattice-automorphism enumeration filtered
+  through the same spectral check — nothing asserted about a
+  Hamiltonian that is not verified on it. Valid for spectral
+  observables, stated plainly.
+- **Band interpolation** (`fourier_interpolation`): the exact-
+  arithmetic Fourier backbone of Wannier interpolation — sample H(k),
+  S(k) on a grid, transform to H(R) on the torus, evaluate anywhere;
+  machine-precision exact when the hopping range fits the sampling
+  window, with a residual check that detects undersampling.
 - **`gen_eigh`**: generalized eigensolver with canonical
   orthogonalization (Szabo and Ostlund, *Modern Quantum Chemistry*,
   sec. 3.4.5), so mildly overcomplete overlaps cannot blow up the
@@ -209,9 +230,34 @@ exact result, not a stored number:
   kernel-independent closed form spin·4π(at)²/(2|t|) to 3%, and the
   KPM route agrees with the dense eigenpair Kubo route on a dimerized
   chain to 2%; `transmission_sparse` equals dense direct inversion to
-  machine precision, overlap and complex Σ(E) included.
+  machine precision, overlap and complex Σ(E) included;
+- the zero-flux magnetic supercell reproduces exact band folding; the
+  π-flux square lattice reproduces E = ±2|t|√(cos²kₓ + cos²k_y) to
+  machine precision; the lowest 1/3-flux Hofstadter band's Chern
+  number matches σ_xy on the magnetic cell (TKNN, sign included), and
+  an incompatible flux gauge is refused with the exact equivalent-flux
+  remedy;
+- `find_point_group` returns group orders 12 (hexagonal), 8 (square)
+  and 2 (chain), a strict subset on a bond-stretched crystal, and its
+  detected group folds the DOS exactly;
+- the multi-probe network conserves current to machine precision,
+  reduces to the single Büttiker probe exactly, and gives Ohmic
+  linear-in-length resistance (R² > 0.9999);
+- the Bianco-Resta Chern marker's whole-system total vanishes to
+  10⁻⁸, its bulk average equals the periodic Chern number (sign
+  included) and vanishes in the trivial phase; the impossibility of a
+  finite-system DC Hall conductivity, Im Tr[PxQy] = 0, is itself a
+  test;
+- intra-atomic dipoles work identically in a nonorthogonal basis (two
+  uncoupled atoms double exactly; energy-zero gauge invariance holds
+  with overlap and dipole to 10⁻¹⁰), and the KPM conductivity picks up
+  the same dipole line through the exact operator i(HX − XH);
+- Fourier interpolation reproduces the direct bands to 10⁻¹² for the
+  chain, nonorthogonal chain, graphene, SSH and Haldane models, and
+  flags an undersampled grid through its residual.
 
-Run them yourself: `pip install -e .[test]` then `pytest`.
+Run them yourself: `pip install -e .[test]` then `pytest` — 119 tests
+across Python 3.9 through 3.13.
 
 ## Install and use
 
@@ -245,9 +291,10 @@ Conventions, stated once: energies in eV, positions in Angstrom, k in
 its Hermitian partner is implied. Optical conductivity is the real
 sheet conductivity in units of e²/(4ℏ) with spin degeneracy as an
 explicit factor (default 2). The velocity operator uses the standard
-atomistic position gauge (position operator diagonal at the sites);
-the intra-atomic dipole contribution is neglected, the common
-approximation in tight-binding optics.
+atomistic position gauge (position operator diagonal at the sites) by
+default — the common approximation in tight-binding optics — and the
+intra-atomic dipole contribution is added when on-site position blocks
+are supplied through `model.set_dipole`.
 
 ## Relation to existing tools
 
@@ -255,38 +302,46 @@ Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.
 
 ## Status
 
-v0.4.0 (alpha). Implemented and tested: the model container with exact
-k-derivatives and intra-atomic dipole blocks,
-canonical-orthogonalization eigensolver, band structures and k-paths,
-densities of states, filling-resolved chemical potentials, band edges;
-Kubo-Greenwood optical conductivity (Gaussian or Lorentzian
-broadening, dipole term included), the complex interband conductivity
-tensor σ_ab(ω) including the finite-frequency Hall component, and the
-intraband Drude weight; Wilson-loop Berry phases, lattice Berry
-curvature and Chern numbers in orthogonal and nonorthogonal bases,
-in two frame conventions (Löwdin and atomic), dense or sparse solver;
-spin doubling, Pauli-block spin-orbit terms and the Kane-Mele
-builder; uniform magnetic fields on finite models by Peierls
-substitution; Sancho-Rubio surface Green functions, recursive,
-direct-inversion and sparse-LU Landauer transmission, verified
-automatic principal-layer partitioning, per-layer interaction
-self-energies, the Büttiker dephasing probe and the elastic
-self-consistent Born (SCBA) disorder self-energy; time-reversal and
-verified point-group k-mesh folding; sparse Bloch and velocity
-assembly, Lanczos low-energy bands, KPM densities of states
-(nonorthogonal included) and the KPM optical conductivity.
+v0.5.0 (alpha). Implemented and tested (119 closed-form-anchored
+tests, Python 3.9–3.13): the model container with exact k-derivatives
+and intra-atomic dipole blocks, canonical-orthogonalization
+eigensolver, band structures and k-paths, densities of states,
+filling-resolved chemical potentials, band edges; Kubo-Greenwood
+optical conductivity (Gaussian or Lorentzian broadening, dipole term
+included in orthogonal and nonorthogonal bases), the complex interband
+conductivity tensor σ_ab(ω) including the finite-frequency Hall
+component, and the intraband Drude weight; Wilson-loop Berry phases,
+lattice Berry curvature and Chern numbers in orthogonal and
+nonorthogonal bases, two frame conventions (Löwdin and atomic), dense
+or sparse solver, plus the real-space Chern marker for finite systems;
+spin doubling, Pauli-block spin-orbit terms and the Kane-Mele builder;
+uniform magnetic fields on finite models by Peierls substitution and
+Hofstadter magnetic supercells for periodic ones; Sancho-Rubio surface
+Green functions, recursive, direct-inversion and sparse-LU Landauer
+transmission, verified automatic principal-layer partitioning,
+per-layer interaction self-energies, the Büttiker probe, the
+multi-probe dephasing network and the elastic SCBA disorder
+self-energy; time-reversal folding, verified point-group folding and
+automatic point-group detection; sparse Bloch and velocity assembly,
+Lanczos low-energy bands, KPM densities of states (nonorthogonal
+included) and KPM optical conductivity; and exact Fourier band
+interpolation.
 
-Not yet implemented, stated plainly: magnetic fields in *periodic*
-systems (magnetic unit cells / Hofstadter physics — `with_peierls` is
-finite-only and refuses otherwise); inelastic (Keldysh)
-electron-phonon SCBA — the SCBA here is elastic, disorder-type, and
-the disorder-averaged conductance carries no vertex corrections;
-automatic space-group detection — `symmetry_fold` verifies
-user-supplied operations, it does not find them, and its folded grids
-serve spectral observables only; the Hall component and intra-atomic
-dipoles in the *sparse* (KPM) conductivity; intra-atomic dipoles in
-nonorthogonal bases (refused explicitly); and Wannier interpolation
-of any kind.
+Deliberate scope, stated plainly — designed-out, not overlooked:
+inelastic (Keldysh) electron-phonon SCBA (the SCBA here is elastic,
+disorder-type, and the disorder-averaged conductance carries no vertex
+corrections); a finite-system KPM *Hall* conductivity (impossible in
+the site-diagonal position formulation — Im Tr[PxQy] = 0 for any
+bounded system, which is itself a test — so the real-space Chern
+marker is the honest finite-system observable); maximally localized
+Wannier functions (`fourier_interpolation` is the exact Fourier step
+those methods build on, not the localization procedure); and
+electron-electron interactions beyond a supplied static self-energy
+(no mean-field or GW self-consistency). Everything the package's
+original design roadmap named is now implemented; these remaining
+items are research-frontier machinery with genuine methodological
+choices, kept out precisely so a user can tell a designed boundary
+from a gap.
 
 ## Where it comes from
 
