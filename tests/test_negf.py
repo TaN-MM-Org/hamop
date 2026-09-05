@@ -269,3 +269,59 @@ def test_transmission_sparse_equals_direct():
     T3 = transmission_direct(E * 0.5, lay, cp, H00, H01, lS, cS, S00, S01)
     T4 = transmission_sparse(E * 0.5, lay, cp, H00, H01, lS, cS, S00, S01)
     assert np.abs(T3 - T4).max() < 1e-12
+
+
+# ----------------------------------------------------------------------
+# multi-probe dephasing network (D'Amato-Pastawski)
+
+def test_multiprobe_at_zero_coupling_is_coherent():
+    from hamop import multiprobe_transmission, transmission
+    lay, cp, H00, H01 = _chain_device(15)
+    E = np.array([-1.1, 0.2, 0.8])
+    T0 = multiprobe_transmission(E, lay, cp, H00, H01, gamma=0.0)
+    Tc = transmission(E, lay, cp, H00, H01)
+    assert np.abs(T0 - Tc).max() < 1e-12
+
+
+def test_single_probe_reduces_to_buttiker_exactly():
+    from hamop import buttiker_transmission, multiprobe_transmission
+    lay, cp, H00, H01 = _chain_device(15)
+    E = np.array([-1.1, 0.2, 0.8])
+    Tm = multiprobe_transmission(E, lay, cp, H00, H01, gamma=0.35,
+                                 probe_layers=[7])
+    Tb = buttiker_transmission(E, lay, cp, H00, H01, probe_layer=7,
+                               gamma=0.35)
+    assert np.abs(Tm - Tb).max() < 1e-12
+
+
+def test_multiprobe_conserves_current_exactly():
+    from hamop import multiprobe_transmission
+    lay, cp, H00, H01 = _chain_device(15)
+    _, parts = multiprobe_transmission(np.array([0.2]), lay, cp, H00, H01,
+                                       gamma=0.25, return_parts=True)
+    T, V = parts[0]["T"], parts[0]["V"]
+    nt = len(V)
+    I = np.array([sum(T[a, b] * (V[a] - V[b]) for b in range(nt))
+                  for a in range(nt)])
+    assert np.abs(I[2:]).max() < 1e-12         # probes draw no current
+    assert abs(I[0] + I[1]) < 1e-12            # in = out
+    assert abs(I.sum()) < 1e-12
+
+
+def test_uniform_dephasing_gives_ohmic_scaling():
+    """The D'Amato-Pastawski result (PRB 41, 7411 (1990)): with a probe
+    on every site the resistance grows linearly with length."""
+    from hamop import multiprobe_transmission
+    Ns = [8, 14, 20, 26, 32]
+    R = []
+    for N in Ns:
+        lay, cp, H00, H01 = _chain_device(N)
+        Te = multiprobe_transmission(np.array([0.2]), lay, cp, H00, H01,
+                                     gamma=0.25)
+        R.append(1.0 / Te[0])
+    R = np.array(R)
+    fit = np.polyfit(Ns, R, 1)
+    pred = np.polyval(fit, Ns)
+    r2 = 1.0 - np.sum((R - pred) ** 2) / np.sum((R - R.mean()) ** 2)
+    assert fit[0] > 0.0                        # resistance grows
+    assert r2 > 0.9999                         # and linearly

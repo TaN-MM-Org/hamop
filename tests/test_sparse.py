@@ -199,3 +199,24 @@ def test_kpm_sigma_refusals():
         kpm_sigma(lc(), E, mu=0.0)                   # periodic
     with pytest.raises(ValueError):
         kpm_sigma(_open_chain(10, s=0.2), E, mu=0.0)  # overlap
+
+
+def test_kpm_sigma_includes_the_dipole_velocity():
+    """The exact sparse operator i(HX - XH) reproduces the atomic
+    dipole line's kernel-independent integrated weight, and the atom
+    stays exactly dark without the dipole block."""
+    from hamop import kpm_sigma
+    D, d = 1.6, 0.7
+    m = TightBindingModel([[0.0]], norb=2, cell=None)
+    m.add_hop(0, 0, (0,), [[0.0, 0.0], [0.0, D]])
+    om = np.linspace(0.8, 2.4, 401)
+    assert np.abs(kpm_sigma(m, np.linspace(1.5, 1.7, 11), mu=0.5 * D,
+                            n_moments=64)).max() == 0.0
+    X = np.zeros((2, 2, 1), dtype=complex)
+    X[0, 1, 0] = X[1, 0, 0] = d
+    m.set_dipole(0, X)
+    sig = kpm_sigma(m, om, mu=0.5 * D, n_moments=256, T=10.0)
+    integrate = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    W = integrate(sig, om)
+    expected = 2.0 * 4.0 * np.pi * (D * d) ** 2 / D
+    assert abs(W - expected) / expected < 0.03

@@ -64,12 +64,44 @@ def test_tensor_route_agrees_with_the_optical_route():
     assert np.abs(sT - sL).max() / sL.max() < 1e-3
 
 
-def test_dipoles_with_overlap_are_refused():
-    m = linear_chain(t=-1.0, s=0.2)
-    X = np.zeros((1, 1, 1), dtype=complex)
-    m.set_dipole(0, X)
-    with pytest.raises(ValueError):
-        sigma_optical(m, np.array([1.0]), mu=0.0, mesh=20)
+def test_nonorthogonal_dipoles_two_uncoupled_atoms_double_exactly():
+    """<n|[H,x]|m> = (E_n - E_m) <n|x|m> is an operator identity on the
+    generalized eigenstates, so the dipole term works verbatim with
+    overlap.  Two uncoupled atoms (explicit identity S, so the overlap
+    code path runs) must give exactly twice the single atom."""
+    om = np.linspace(1.55, 1.65, 101)
+    s1 = sigma_optical(_atom(), om, 0.5 * DELTA, eta=ETA, T=10.0)
+    m2 = TightBindingModel([[0.0], [50.0]], norb=[2, 2], cell=None)
+    for site in (0, 1):
+        m2.add_hop(site, site, (0,), [[0.0, 0.0], [0.0, DELTA]],
+                   [[1.0, 0.0], [0.0, 1.0]])
+        X = np.zeros((2, 2, 1), dtype=complex)
+        X[0, 1, 0] = X[1, 0, 0] = DIP
+        m2.set_dipole(site, X)
+    s2 = sigma_optical(m2, om, 0.5 * DELTA, eta=ETA, T=10.0)
+    assert np.abs(s2 - 2.0 * s1).max() == 0.0
+
+
+def test_nonorthogonal_dipole_energy_zero_gauge_invariance():
+    """H -> H + c S with mu -> mu + c leaves sigma unchanged, dipole
+    term included: energy differences, eigenvectors and X are all
+    invariant."""
+    s_ov, c = 0.25, 5.0
+
+    def atom_ov(shift):
+        m = TightBindingModel([[0.0]], norb=2, cell=None)
+        S0 = np.array([[1.0, s_ov], [s_ov, 1.0]])
+        H0 = np.array([[0.0, 0.0], [0.0, DELTA]]) + shift * S0
+        m.add_hop(0, 0, (0,), H0, S0)
+        X = np.zeros((2, 2, 1), dtype=complex)
+        X[0, 1, 0] = X[1, 0, 0] = DIP
+        m.set_dipole(0, X)
+        return m
+
+    om = np.linspace(0.5, 3.0, 26)
+    g1 = sigma_optical(atom_ov(0.0), om, 0.5 * DELTA, eta=ETA, T=10.0)
+    g2 = sigma_optical(atom_ov(c), om, 0.5 * DELTA + c, eta=ETA, T=10.0)
+    assert np.abs(g1 - g2).max() < 1e-10
 
 
 def test_non_hermitian_dipole_block_is_refused():

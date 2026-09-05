@@ -103,3 +103,45 @@ def test_non_symmetry_operations_are_refused():
     c6, s6 = np.cos(np.pi / 3), np.sin(np.pi / 3)
     with pytest.raises(ValueError):
         symmetry_fold(m, 12, [np.array([[c6, -s6], [s6, c6]])])
+
+
+# ----------------------------------------------------------------------
+# automatic point-group detection
+
+def test_detected_group_orders_match_the_lattices():
+    """Hexagonal point group has order 12, square 8, the 1D chain 2 --
+    counted here from exact lattice-automorphism enumeration filtered
+    by the spectral check."""
+    from hamop import TightBindingModel, find_point_group, linear_chain
+    assert len(find_point_group(graphene())) == 12
+    sq = TightBindingModel([[0.0, 0.0]], 1, cell=[[1.0, 0.0], [0.0, 1.0]])
+    sq.add_hop(0, 0, (0, 0), [[0.0]])
+    sq.add_hop(0, 0, (1, 0), [[-1.0]])
+    sq.add_hop(0, 0, (0, 1), [[-1.0]])
+    assert len(find_point_group(sq)) == 8
+    assert len(find_point_group(linear_chain())) == 2
+
+
+def test_broken_symmetry_shrinks_the_detected_group():
+    from hamop import TightBindingModel, find_point_group
+    a = 2.46
+    cell = a * np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
+    pos = np.array([np.zeros(2), (cell[0] + cell[1]) / 3.0])
+    m = TightBindingModel(positions=pos, norb=1, cell=cell)
+    m.add_hop(0, 1, (0, 0), [[-3.4]])          # one stretched bond
+    m.add_hop(0, 1, (-1, 0), [[-2.7]])
+    m.add_hop(0, 1, (0, -1), [[-2.7]])
+    ops = find_point_group(m)
+    assert 1 < len(ops) < 12                   # subset, identity included
+
+
+def test_detected_group_folds_the_dos_exactly():
+    from hamop import fermi_level, find_point_group, symmetry_fold
+    g = graphene()
+    ops = find_point_group(g)
+    k1, w1 = g.monkhorst_pack(24)
+    k2, w2 = symmetry_fold(g, 24, ops)
+    assert len(k2) < len(k1) / 5
+    E = np.array([0.5, 1.0, 2.0])
+    assert np.abs(dos(g, E, kpts=k1, weights=w1)
+                  - dos(g, E, kpts=k2, weights=w2)).max() < 1e-12

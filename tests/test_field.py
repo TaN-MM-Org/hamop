@@ -102,3 +102,71 @@ def test_lowest_landau_level_of_the_square_lattice():
     hwc = 4.0 * np.pi * phi
     assert abs((e[0] + 4.0) - 0.5 * hwc) / (0.5 * hwc) < 0.03
     assert e[5] - e[0] < 0.1 * hwc            # first LL degeneracy
+
+
+# ----------------------------------------------------------------------
+# Hofstadter magnetic supercells (periodic systems at rational flux)
+
+def _square_lattice(t=-1.0, a=1.0):
+    m = TightBindingModel([[0.0, 0.0]], 1, cell=[[a, 0.0], [0.0, a]])
+    m.add_hop(0, 0, (0, 0), [[0.0]])
+    m.add_hop(0, 0, (1, 0), [[t]])
+    m.add_hop(0, 0, (0, 1), [[t]])
+    return m
+
+
+def test_zero_flux_supercell_is_exact_band_folding():
+    from hamop import magnetic_supercell
+    sq = _square_lattice()
+    sc = magnetic_supercell(sq, 0, 3)
+    k = np.array([0.31, -0.7])
+    recip = 2.0 * np.pi * np.linalg.inv(sq.cell).T
+    e_sc = np.sort(bands(sc, [k])[0])
+    folded = np.sort(np.concatenate(
+        [bands(sq, [k + j * recip[0] / 3.0])[0] for j in range(3)]))
+    assert np.abs(e_sc - folded).max() < 1e-12
+
+
+def test_pi_flux_square_lattice_closed_form():
+    """At flux 1/2 the magnetic bands are E = +-2|t| sqrt(cos^2 kx +
+    cos^2 ky) -- derivable by hand from the two-site magnetic cell."""
+    from hamop import magnetic_supercell
+    sc = magnetic_supercell(_square_lattice(), 1, 2)
+    for kx, ky in [(0.3, 0.4), (-0.9, 1.1), (0.0, 0.0)]:
+        e = np.sort(bands(sc, [[kx, ky]])[0])
+        exact = 2.0 * np.sqrt(np.cos(kx) ** 2 + np.cos(ky) ** 2)
+        assert np.abs(e - np.array([-exact, exact])).max() < 1e-12
+
+
+def test_hofstadter_band_count_and_tknn_consistency():
+    """phi = 1/3: three magnetic bands, the lowest carrying a unit
+    Chern number that must agree -- sign included -- with sigma_xy(0)
+    computed on the same magnetic cell with mu in the first gap: the
+    TKNN circle closed entirely inside the package."""
+    from hamop import chern_number, magnetic_supercell, sigma_tensor
+    sc = magnetic_supercell(_square_lattice(), 1, 3)
+    assert bands(sc, [[0.1, 0.2]])[0].shape == (3,)
+    C = chern_number(sc, mesh=15, n_occ=1)
+    assert abs(abs(C) - 1.0) < 1e-12
+    sxy = sigma_tensor(sc, [0.0], mu=-1.3, directions=(0, 1), mesh=36,
+                       T=10.0, eta=1e-4, spin=1)[0]
+    assert abs(sxy.real * np.pi / 2.0 - C) < 1e-4
+
+
+def test_incompatible_gauge_is_refused_with_a_remedy():
+    """Graphene's sublattice offset has fractional a2-coordinate 1/3,
+    so p = 1 cannot be represented in this gauge -- refused -- while
+    the equivalent flux 3/9 works and p = 0 folds exactly."""
+    from hamop import graphene as gr, magnetic_supercell
+    g = gr()
+    with pytest.raises(ValueError):
+        magnetic_supercell(g, 1, 3)
+    sc = magnetic_supercell(g, 3, 9)          # same flux, valid gauge
+    assert bands(sc, [[0.1, 0.2]])[0].shape == (18,)
+    sc0 = magnetic_supercell(g, 0, 2)
+    k = np.array([0.21, -0.33])
+    recip = 2.0 * np.pi * np.linalg.inv(g.cell).T
+    e_sc = np.sort(bands(sc0, [k])[0])
+    folded = np.sort(np.concatenate(
+        [bands(g, [k + j * recip[0] / 2.0])[0] for j in range(2)]))
+    assert np.abs(e_sc - folded).max() < 1e-12

@@ -147,3 +147,70 @@ def test_sparse_solver_refusals():
         chern_number(haldane(), mesh=6, solver="sparse")     # nao too small
     with pytest.raises(ValueError):
         chern_number(haldane(s=0.1), mesh=6, solver="sparse")  # overlap
+
+
+# ----------------------------------------------------------------------
+# real-space topology of finite systems
+
+def _haldane_flake(nx, ny, m_ab=0.0):
+    from hamop import TightBindingModel
+    h = haldane(t1=-1.0, t2=0.1, phi=np.pi / 2, m_ab=m_ab)
+    pos, idx = [], {}
+    for i in range(nx):
+        for j in range(ny):
+            for s in range(2):
+                idx[(i, j, s)] = len(pos)
+                pos.append(h.positions[s] + i * h.cell[0] + j * h.cell[1])
+    m = TightBindingModel(np.array(pos), 1, None)
+    for i in range(nx):
+        for j in range(ny):
+            for (si, sj, img, Hb, Sb) in h._hops:
+                ti, tj = i + img[0], j + img[1]
+                if 0 <= ti < nx and 0 <= tj < ny:
+                    m.add_hop(idx[(i, j, si)], idx[(ti, tj, sj)],
+                              (0, 0), Hb)
+    return m, h, idx
+
+
+def test_finite_dc_hall_vanishes_identically():
+    """Im Tr[P x Q y] = 0 for any Hermitian projector and real diagonal
+    x, y -- the reason a bounded system's DC Hall response is zero in
+    the site-diagonal position formulation, and the reason the package
+    offers the Chern marker instead of a finite-system KPM sigma_xy."""
+    rng = np.random.default_rng(1)
+    n = 10
+    H = rng.normal(size=(n, n)) + 1j * rng.normal(size=(n, n))
+    H = H + H.conj().T
+    e, c = np.linalg.eigh(H)
+    P = c[:, :4] @ c[:, :4].conj().T
+    Q = np.eye(n) - P
+    x = np.diag(rng.uniform(0, 3, n))
+    y = np.diag(rng.uniform(0, 3, n))
+    assert abs(np.imag(np.trace(P @ x @ Q @ y))) < 1e-12
+
+
+def test_chern_marker_bulk_value_and_exact_total():
+    """Bianco-Resta marker (PRB 84, 241106(R) (2011)): bulk average
+    equals the periodic Chern number to a few percent on a 10 x 10
+    flake, and the total over the finite system vanishes exactly."""
+    from hamop import chern_marker
+    m, h, idx = _haldane_flake(10, 10)
+    mk = chern_marker(m, 0.0)
+    assert abs(mk.sum()) < 1e-8
+    Ac = abs(np.linalg.det(h.cell))
+    bulk = sum(mk[idx[(i, j, s)]] for i in range(3, 7)
+               for j in range(3, 7) for s in range(2)) / (16.0 * Ac)
+    C = chern_number(haldane(t1=-1.0, t2=0.1, phi=np.pi / 2), mesh=18)
+    assert abs(bulk - C) < 0.05                # sign included
+    m_t, h_t, idx_t = _haldane_flake(10, 10, m_ab=0.9)
+    mk_t = chern_marker(m_t, 0.0)
+    bulk_t = sum(mk_t[idx_t[(i, j, s)]] for i in range(3, 7)
+                 for j in range(3, 7) for s in range(2)) / (16.0 * Ac)
+    assert abs(bulk_t) < 0.05
+
+
+def test_chern_marker_refusals():
+    import pytest
+    from hamop import chern_marker
+    with pytest.raises(ValueError):
+        chern_marker(haldane(), 0.0)           # periodic
