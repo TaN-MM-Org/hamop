@@ -20,7 +20,8 @@ from .lattices import (chain_lead_blocks, graphene, haldane,
                        linear_chain, ssh, two_site)
 from .interpolate import FourierInterpolator, fourier_interpolation
 from .model import TightBindingModel
-from .negf import (buttiker_transmission, multiprobe_transmission,
+from .negf import (bond_currents, buttiker_transmission, device_greens,
+                   device_ldos, multiprobe_transmission,
                    sancho_rubio, scba_transmission, transmission,
                    transmission_direct, transmission_sparse)
 from .peierls import magnetic_supercell, with_peierls
@@ -31,13 +32,14 @@ from .spectrum import band_edges, bands, dos, fermi_level, k_path
 from .spin import PAULI, kane_mele, with_spin
 from .symmetry import find_point_group, symmetry_fold
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
     "sigma_optical", "sigma_tensor", "drude_weight", "carrier_count",
     "berry_phase", "berry_curvature", "chern_number", "chern_marker",
     "sancho_rubio", "transmission", "transmission_direct",
+    "device_greens", "device_ldos", "bond_currents",
     "transmission_sparse", "buttiker_transmission", "scba_transmission",
     "multiprobe_transmission", "principal_layers",
     "bloch_sparse", "bloch_derivative_sparse", "lowest_bands",

@@ -489,3 +489,112 @@ def multiprobe_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
         T_eff[iE] = I_L
         parts.append({"T": T, "V": V})
     return (T_eff, parts) if return_parts else T_eff
+
+
+# ---------------- local spectroscopy and current imaging ----------------
+
+def device_greens(E, layers_H, coup_H, lead_H00, lead_H01, layers_S=None,
+                  coup_S=None, lead_S00=None, lead_S01=None, eta=1e-6,
+                  sigma_int=None, attach_leads=True):
+    """Full retarded device Green function with (optionally) the lead
+    self-energies attached, plus the embedded broadening matrices.
+
+    Returns (G, offs, GamL, GamR) with G the (n, n) retarded Green
+    function over all device orbitals, offs the layer offsets, and
+    GamL/GamR the lead broadenings embedded at full device size (zero
+    when attach_leads=False). The plumbing is held to an exact
+    identity in the tests rather than trusted:
+    i (G - G^dag) = G (GamL + GamR + 2 eta S) G^dag at ANY eta.
+    """
+    N = len(layers_H)
+    layers_S = [None] * N if layers_S is None else layers_S
+    coup_S = [None] * (N - 1) if coup_S is None else coup_S
+    A, offs = _assemble_device(E, layers_H, coup_H, layers_S, coup_S,
+                               eta, sigma_int)
+    n = offs[-1]
+    GamL = np.zeros((n, n), dtype=complex)
+    GamR = np.zeros((n, n), dtype=complex)
+    if attach_leads:
+        sigL, sigR, gamL, gamR = _lead_sigmas(
+            E, lead_H00, lead_H01, lead_S00, lead_S01, eta)
+        nl = offs[1]
+        nr = n - offs[N - 1]
+        A[:nl, :nl] -= sigL
+        A[offs[N - 1]:, offs[N - 1]:] -= sigR
+        GamL[:nl, :nl] = gamL
+        GamR[offs[N - 1]:, offs[N - 1]:] = gamR
+    G = np.linalg.inv(A)
+    return G, offs, GamL, GamR
+
+
+def device_ldos(E_list, layers_H, coup_H, lead_H00, lead_H01,
+                layers_S=None, coup_S=None, lead_S00=None, lead_S01=None,
+                eta=1e-6, sigma_int=None, attach_leads=True):
+    """Orbital-resolved local density of states of the device,
+    LDOS_i(E) = -Im (G S)_ii / pi (S = identity for orthogonal bases;
+    Mulliken convention otherwise). Shape (len(E_list), n_orbitals).
+
+    Anchors in the tests: with the leads detached the LDOS equals the
+    exact Lorentzian eigen-sum of the isolated device at the same eta
+    to machine precision, and with leads attached the underlying
+    spectral function satisfies the exact finite-eta identity of
+    `device_greens`.
+    """
+    N = len(layers_H)
+    layers_S_l = [None] * N if layers_S is None else layers_S
+    out = np.empty((len(E_list), sum(len(h) for h in layers_H)))
+    for iE, E in enumerate(E_list):
+        G, offs, _, _ = device_greens(
+            E, layers_H, coup_H, lead_H00, lead_H01, layers_S, coup_S,
+            lead_S00, lead_S01, eta, sigma_int, attach_leads)
+        if layers_S is None:
+            GS = G
+        else:
+            Sfull = np.eye(offs[-1], dtype=complex)
+            for i in range(N):
+                if layers_S_l[i] is not None:
+                    Sfull[offs[i]:offs[i + 1], offs[i]:offs[i + 1]] = \
+                        layers_S_l[i]
+            GS = G @ Sfull
+        out[iE] = -np.imag(np.diag(GS)) / np.pi
+    return out
+
+
+def bond_currents(E, layers_H, coup_H, lead_H00, lead_H01, eta=1e-9,
+                  sigma_int=None):
+    """Energy-resolved bond-current map at zero temperature for
+    left-lead injection, in transmission units (Paulsson and
+    Brandbyge, Phys. Rev. B 76, 115117 (2007), orthogonal basis):
+
+        J_ij(E) = 2 Im[ H_ji (G GamL G^dag)_ij ],
+
+    antisymmetric by construction, oriented so that positive J_ij is
+    net flow from orbital i to orbital j. Three exact statements are
+    asserted in the tests rather than stated: the net current out of
+    every interior orbital vanishes (Kirchhoff, up to the eta leakage,
+    which is why the default eta is small here); the summed current
+    through EVERY inter-layer cut equals the Caroli transmission T(E)
+    computed by the independent `transmission` code path; and the
+    first/last layers inject/drain exactly +T/-T.
+
+    Nonorthogonal bases are refused: the bond-current partition with
+    overlap requires energy-dependent bond operators this function
+    does not implement, and a wrong current map is worse than none.
+
+    Returns (J (n, n) antisymmetric, offs).
+    """
+    G, offs, GamL, _ = device_greens(
+        E, layers_H, coup_H, lead_H00, lead_H01, None, None, None, None,
+        eta, sigma_int, attach_leads=True)
+    n = offs[-1]
+    N = len(layers_H)
+    Hfull = np.zeros((n, n), dtype=complex)
+    for i in range(N):
+        Hfull[offs[i]:offs[i + 1], offs[i]:offs[i + 1]] = layers_H[i]
+        if i < N - 1:
+            Hfull[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = coup_H[i]
+            Hfull[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
+                coup_H[i].conj().T
+    AL = G @ GamL @ G.conj().T
+    J = -2.0 * np.imag(Hfull * AL.T)
+    return J, offs
