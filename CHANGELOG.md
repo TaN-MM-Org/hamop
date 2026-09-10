@@ -5,6 +5,28 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.6.0 - 2026-09-10
+
+Local spectroscopy and current imaging: the NEGF device becomes
+spatially resolvable, with every new observable anchored to an exact
+identity.
+
+- `device_greens`: full retarded device Green function with embedded
+  lead broadenings; held to the exact finite-eta spectral identity
+  i(G - G^dag) = G (GamL + GamR + 2 eta) G^dag at ANY eta (machine
+  precision, asserted).
+- `device_ldos`: orbital-resolved LDOS of the open (or closed)
+  device; the closed-device case equals the exact Lorentzian
+  eigen-sum to 1e-13, the clean-ribbon case is translation-uniform,
+  and the open case is positive.
+- `bond_currents`: zero-temperature bond-current map for left-lead
+  injection (Paulsson and Brandbyge, PRB 76, 115117 (2007)),
+  antisymmetric and oriented; Kirchhoff holds at every interior
+  orbital, EVERY inter-layer cut sums to the independently computed
+  Caroli transmission, the contact layers inject/drain exactly +T/-T,
+  and the map vanishes outside the lead band. Nonorthogonal bases
+  are refused rather than approximated.
+
 ## v0.5.0 - 2026-09-05
 
 - Hofstadter magnetic supercells for periodic 2D models at rational

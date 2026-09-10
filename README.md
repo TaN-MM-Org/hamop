@@ -256,7 +256,7 @@ exact result, not a stored number:
   chain, nonorthogonal chain, graphene, SSH and Haldane models, and
   flags an undersampled grid through its residual.
 
-Run them yourself: `pip install -e .[test]` then `pytest` — 119 tests
+Run them yourself: `pip install -e .[test]` then `pytest` — 124 tests
 across Python 3.9 through 3.13.
 
 ## Install and use
@@ -302,7 +302,7 @@ Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.
 
 ## Status
 
-v0.5.0 (alpha). Implemented and tested (119 closed-form-anchored
+v0.6.0 (alpha). Implemented and tested (124 closed-form-anchored
 tests, Python 3.9–3.13): the model container with exact k-derivatives
 and intra-atomic dipole blocks, canonical-orthogonalization
 eigensolver, band structures and k-paths, densities of states,
@@ -326,6 +326,20 @@ automatic point-group detection; sparse Bloch and velocity assembly,
 Lanczos low-energy bands, KPM densities of states (nonorthogonal
 included) and KPM optical conductivity; and exact Fourier band
 interpolation.
+
+New in v0.6: local NEGF observables. `device_ldos` gives the
+orbital-resolved local density of states of the open device (Mulliken
+convention for nonorthogonal bases), and `bond_currents` the
+energy-resolved bond-current map for left-lead injection (Paulsson &
+Brandbyge 2007). Both are held to exact identities rather than trust:
+the retarded plumbing satisfies i(G−G†) = G(Γ_L+Γ_R+2η)G† at any η to
+machine precision, the closed-device LDOS equals the Lorentzian
+eigen-sum exactly, and the current map obeys Kirchhoff at every
+interior orbital, sums to the independently computed Caroli
+transmission through every inter-layer cut, and injects/drains
+exactly ±T at the contacts. Nonorthogonal bond currents are refused,
+not approximated — the overlap partition needs energy-dependent bond
+operators this release does not implement.
 
 Deliberate scope, stated plainly — designed-out, not overlooked:
 inelastic (Keldysh) electron-phonon SCBA (the SCBA here is elastic,
