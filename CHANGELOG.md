@@ -5,6 +5,34 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.7.0 - 2026-09-12
+
+Real-materials release: the standard interchange format for
+first-principles-derived tight-binding Hamiltonians now imports in
+one line.
+
+- `from_wannier90` / `load_wannier90_hr` / `save_wannier90_hr`:
+  strict parsing of the Wannier90 ``seedname_hr.dat`` format
+  (degeneracy weights divided per the convention), model construction
+  with user-supplied lattice vectors and optional Wannier centres
+  (hr.dat carries neither; they come from you, stated rather than
+  guessed -- centres are exactly irrelevant for eigenvalue-derived
+  quantities and matter only for the optical matrix elements), and
+  an exact write/read round trip. Refusals with explanations: wrong
+  element counts, duplicate or missing elements, truncated
+  degeneracy lists, a cell dimension that does not match the
+  R-vectors, and real-space Hermiticity violations
+  (H(R) != H(-R)^dagger), which are never symmetrized silently.
+- Anchors: a graphene hr.dat written independently of the parser
+  reproduces the closed-form-anchored `lattices.graphene` bands at
+  random k to 1e-12, closes the gap at the Dirac point, and gives
+  the identical Kubo optical conductivity through the imported
+  model; centres shift changes no eigenvalue (gauge invariance,
+  asserted); the round trip preserves H(k) against an independent
+  direct Bloch sum; degeneracy division is checked entry by entry;
+  and every refusal fires on a deliberately corrupted file.
+- README: a "Real materials in" section; status counts updated.
+
 ## v0.6.0 - 2026-09-10
 
 Local spectroscopy and current imaging: the NEGF device becomes

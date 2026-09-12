@@ -296,13 +296,45 @@ default — the common approximation in tight-binding optics — and the
 intra-atomic dipole contribution is added when on-site position blocks
 are supplied through `model.set_dipole`.
 
+## Real materials in: Wannier90 import (new in v0.7)
+
+Hand-built lattices are fine for models with closed-form anchors; a
+real material usually arrives as a Wannier90 `seedname_hr.dat` file —
+the standard interchange for tight-binding Hamiltonians derived from
+first-principles calculations. `from_wannier90` reads that documented
+format strictly and builds a `TightBindingModel`, so every observable
+in the package — bands, DOS, Kubo optics, topology, NEGF transport —
+applies to the imported material with no re-typing of matrix
+elements.
+
+```python
+m = hamop.from_wannier90("mymaterial_hr.dat", cell=my_cell,
+                         centers=my_wannier_centres)   # both Angstrom
+```
+
+What the file does not carry, you supply, stated rather than guessed:
+the lattice vectors (hr.dat has no cell block), and optionally the
+Wannier centres. Without centres all orbitals sit at the origin —
+exactly irrelevant for every eigenvalue-derived quantity, but the
+optical matrix elements use the site-diagonal position operator, so
+give the true centres when the optics matter. The parser refuses
+malformed files (wrong counts, duplicate or missing elements,
+truncated degeneracy lists) and refuses a Hamiltonian that is not
+Hermitian in real space instead of symmetrizing it silently.
+`save_wannier90_hr` writes the format back out, and the round trip is
+exact. Anchors in the tests: a graphene hr.dat written independently
+of the parser reproduces the closed-form-anchored `graphene()` bands
+and optical conductivity to machine precision, degeneracy weights
+divide per the convention, and every refusal fires on a deliberately
+corrupted file.
+
 ## Relation to existing tools
 
 Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.edu/pythtb/) and [pybinding](https://docs.pybinding.site/) build tight-binding models and their spectra, and [Kwant](https://kwant-project.org/) is the standard for quantum transport. hamop does not replace any of them, and for their core use cases they are more capable. Its niche is the combination they leave open: nonorthogonal (LCAO-style) overlap matrices as first-class citizens across *all* observables, optics and transport computed from the same Bloch assembly as the spectrum so the three can never disagree, and a deliberately small NumPy/SciPy-only core validated line by line against closed forms -- the shape of engine an LCAO electronic-structure pipeline exports its Hamiltonians into.
 
 ## Status
 
-v0.6.0 (alpha). Implemented and tested (124 closed-form-anchored
+v0.7.0 (alpha). Implemented and tested (129 closed-form-anchored
 tests, Python 3.9–3.13): the model container with exact k-derivatives
 and intra-atomic dipole blocks, canonical-orthogonalization
 eigensolver, band structures and k-paths, densities of states,
