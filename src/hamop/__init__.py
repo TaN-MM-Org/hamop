@@ -31,8 +31,9 @@ from .sparse import (bloch_derivative_sparse, bloch_sparse, kpm_dos,
 from .spectrum import band_edges, bands, dos, fermi_level, k_path
 from .spin import PAULI, kane_mele, with_spin
 from .symmetry import find_point_group, symmetry_fold
+from .wannier import from_wannier90, load_wannier90_hr, save_wannier90_hr
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
@@ -50,4 +51,5 @@ __all__ = [
     "fourier_interpolation", "FourierInterpolator",
     "linear_chain", "two_site", "graphene", "ssh", "haldane",
     "chain_lead_blocks",
+    "from_wannier90", "load_wannier90_hr", "save_wannier90_hr",
 ]
