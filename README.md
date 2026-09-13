@@ -65,7 +65,18 @@ cannot disagree with each other.
   Bianco-Resta real-space Chern marker (Phys. Rev. B 84, 241106(R)
   (2011)) gives the local topological density, its bulk average
   reproducing the periodic Chern number and its whole-system total
-  vanishing identically.
+  vanishing identically. New in v0.8, `berry_dipole` computes the
+  Berry curvature dipole of Sodemann and Fu (Phys. Rev. Lett. 115,
+  216806 (2015)) — the band-geometric quantity behind the nonlinear
+  Hall effect in time-reversal-symmetric crystals — by two
+  independent routes (gradient of the band-resolved lattice
+  curvature, and the Fermi-surface form with Hellmann–Feynman
+  velocities) that the tests require to agree. Its symmetry anchors
+  do real work: inversion and filled bands give exact zeros, C3
+  forces the dipole to vanish (which is why the effect is a strain
+  probe — one scaled bond switches it on), and a single mirror pins
+  its direction. `band_curvatures` exposes the per-band curvature
+  field itself.
 - **Magnetic fields** (`with_peierls`, `magnetic_supercell`): uniform
   out-of-plane fields on finite models by Peierls substitution
   (Peierls, Z. Phys. 80, 763 (1933)) — the midpoint line integral is
@@ -256,7 +267,7 @@ exact result, not a stored number:
   chain, nonorthogonal chain, graphene, SSH and Haldane models, and
   flags an undersampled grid through its residual.
 
-Run them yourself: `pip install -e .[test]` then `pytest` — 124 tests
+Run them yourself: `pip install -e .[test]` then `pytest` — 136 tests
 across Python 3.9 through 3.13.
 
 ## Install and use
@@ -334,7 +345,7 @@ Excellent tools cover parts of this space: [PythTB](https://www.physics.rutgers.
 
 ## Status
 
-v0.7.0 (alpha). Implemented and tested (129 closed-form-anchored
+v0.8.0 (alpha). Implemented and tested (136 closed-form-anchored
 tests, Python 3.9–3.13): the model container with exact k-derivatives
 and intra-atomic dipole blocks, canonical-orthogonalization
 eigensolver, band structures and k-paths, densities of states,
@@ -345,7 +356,8 @@ conductivity tensor σ_ab(ω) including the finite-frequency Hall
 component, and the intraband Drude weight; Wilson-loop Berry phases,
 lattice Berry curvature and Chern numbers in orthogonal and
 nonorthogonal bases, two frame conventions (Löwdin and atomic), dense
-or sparse solver, plus the real-space Chern marker for finite systems;
+or sparse solver, plus the real-space Chern marker for finite systems
+and the Berry curvature dipole with its band-resolved curvature field;
 spin doubling, Pauli-block spin-orbit terms and the Kane-Mele builder;
 uniform magnetic fields on finite models by Peierls substitution and
 Hofstadter magnetic supercells for periodic ones; Sancho-Rubio surface

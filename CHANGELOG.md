@@ -5,6 +5,42 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.8.0 - 2026-09-13
+
+Physics upgrade: the Berry curvature dipole -- the band-geometric
+generator of the nonlinear Hall effect in time-reversal-symmetric
+crystals (Sodemann and Fu, Phys. Rev. Lett. 115, 216806 (2015)).
+
+- `berry_dipole`: D_alpha = sum_n int d^2k/(2 pi)^2 f_n dOmega_n/dk_alpha
+  by two genuinely independent routes -- method="grad" (central
+  differences of the band-resolved plaquette-flux field, works at
+  kT = 0) and method="fermi" (the Fermi-surface form with the
+  analytic Fermi-window derivative and Hellmann-Feynman velocities)
+  -- with per-band contributions reported. Units: Angstrom (2D).
+  Turning D into a nonlinear Hall voltage needs a scattering time
+  and device geometry that are deliberately not guessed.
+- `band_curvatures`: per-band lattice curvature density and energies
+  on the mesh, via exact abelian differences of the tested
+  Fukui-Hatsugai-Suzuki fluxes; the complete band set sums to zero
+  identically, asserted.
+- `fermi_occupation`: the occupation factor, exact step at kT = 0.
+- Anchors, symmetry doing the verifying: inversion symmetry
+  (Haldane at zero mass) cancels D exactly on the mesh; completely
+  filled bands carry exactly zero dipole whatever the symmetry (the
+  BZ average of a gradient); time reversal + C3 (unstrained gapped
+  graphene) forces D -> 0 with mesh refinement while one scaled bond
+  (broken C3) converges to a nonzero dipole an order of magnitude
+  above the trigonal residual -- the strain-switch that makes the
+  nonlinear Hall effect a strain probe; a single mirror line pins D
+  perpendicular to itself (component along the bond cancels to 1e-8);
+  and the two integral forms agree where the answer is nonzero.
+- Honest limits: orthogonal bases only (refused for overlap models
+  rather than dropping the dS terms), and the curvature field is
+  computed in the atomic frame deliberately -- the Loewdin frame's
+  periodic gauge identification preserves Chern totals but
+  redistributes flux locally, which a first moment feels; the C3
+  anchor is what caught this, and the docstring records it.
+
 ## v0.7.0 - 2026-09-12
 
 Real-materials release: the standard interchange format for
