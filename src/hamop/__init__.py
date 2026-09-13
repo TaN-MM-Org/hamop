@@ -13,6 +13,7 @@ https://github.com/Tanvir-Mahmud-Mahim/mos2-vacancy-optics); this
 package is the general-purpose engine distilled from that pipeline.
 """
 from .berry import berry_curvature, berry_phase, chern_number
+from .nonlinear import band_curvatures, berry_dipole, fermi_occupation
 from .device import principal_layers
 from .eigsolve import gen_eigh
 from .kubo import carrier_count, drude_weight, sigma_optical, sigma_tensor
@@ -33,12 +34,13 @@ from .spin import PAULI, kane_mele, with_spin
 from .symmetry import find_point_group, symmetry_fold
 from .wannier import from_wannier90, load_wannier90_hr, save_wannier90_hr
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
     "sigma_optical", "sigma_tensor", "drude_weight", "carrier_count",
     "berry_phase", "berry_curvature", "chern_number", "chern_marker",
+    "band_curvatures", "berry_dipole", "fermi_occupation",
     "sancho_rubio", "transmission", "transmission_direct",
     "device_greens", "device_ldos", "bond_currents",
     "transmission_sparse", "buttiker_transmission", "scba_transmission",
