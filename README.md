@@ -259,6 +259,12 @@ exact result, not a stored number:
   included) and vanishes in the trivial phase; the impossibility of a
   finite-system DC Hall conductivity, Im Tr[PxQy] = 0, is itself a
   test;
+- the Berry curvature dipole vanishes exactly under inversion and
+  for completely filled bands, converges to zero under mesh
+  refinement for the three-fold-symmetric gapped honeycomb while a
+  strained bond switches it on, keeps only the mirror-allowed
+  component when one mirror survives, and its two independent
+  integral forms agree where the answer is nonzero;
 - intra-atomic dipoles work identically in a nonorthogonal basis (two
   uncoupled atoms double exactly; energy-zero gauge invariance holds
   with overlap and dipole to 10⁻¹⁰), and the KPM conductivity picks up
