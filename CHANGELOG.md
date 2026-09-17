@@ -5,6 +5,31 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.9.0 - 2026-09-17
+
+Lab adaptability: fit the model to measured bands, and plan the
+measurement first.
+
+- `lab.fit_bands`: weighted least-squares fit of any user
+  parameterization (a builder theta -> `TightBindingModel`) to
+  measured band energies at known k-points, with the standard
+  (J^T W J)^-1 covariance, chi-squared when measurement errors are
+  supplied, and refusals of non-identifiable designs (scale-invariant
+  rank test, so mixed units cannot fake a degeneracy).
+- `lab.band_information`: the same matrix before any data exist --
+  predicted error bars and an identifiability verdict for a planned
+  (k-point, band) set.
+- `lab.design_kpoints`: greedy D-optimal choice of the most
+  informative k-points (Pukelsheim, Optimal Design of Experiments,
+  SIAM (2006)).
+- Anchors: on the linear chain the model is linear in (t, e0), so the
+  reported covariance equals the textbook closed form
+  sigma^2 (X^T X)^-1 with X = [2 cos(ka), 1], exactly; noiseless fits
+  recover the truth; 300 seeded Monte-Carlo experiments match the
+  reported error bars; a same-cos(ka) design is exactly rank-one and
+  refused by planner and fit alike; the greedy design never loses to
+  a random subset.
+
 ## v0.8.0 - 2026-09-13
 
 Physics upgrade: the Berry curvature dipole -- the band-geometric

@@ -273,7 +273,7 @@ exact result, not a stored number:
   chain, nonorthogonal chain, graphene, SSH and Haldane models, and
   flags an undersampled grid through its residual.
 
-Run them yourself: `pip install -e .[test]` then `pytest` — 136 tests
+Run them yourself: `pip install -e .[test]` then `pytest` — 142 tests
 across Python 3.9 through 3.13.
 
 ## Install and use
@@ -344,6 +344,36 @@ of the parser reproduces the closed-form-anchored `graphene()` bands
 and optical conductivity to machine precision, degeneracy weights
 divide per the convention, and every refusal fires on a deliberately
 corrupted file.
+
+## Fit your model to measured bands
+
+hamop deliberately ships no material constants -- and the measurement
+route to your own is now built in. Give `fit_bands` a builder
+function (your parameterization: hoppings, on-site energies, SOC
+strengths) plus measured band energies at known k-points, and it
+returns the parameters with error bars; before the beam time,
+`band_information` predicts those error bars and `design_kpoints`
+picks the most informative k-points:
+
+```python
+import numpy as np
+from hamop import band_information, design_kpoints, fit_bands, linear_chain
+
+def build(theta):                     # theta = (t, e0)
+    return linear_chain(t=theta[0], e0=theta[1])
+
+k = np.linspace(0.1, 3.0, 12)[:, None]
+info = band_information(build, [-1.0, 0.0], k, sigmas=0.03)
+print(info["identifiable"], info["sigma"])      # ask before measuring
+
+fit = fit_bands(build, [-1.3, 0.5], k, measured_ev, sigmas=0.03)
+print(fit.theta, fit.sigma, fit.chi2)
+```
+
+A design that cannot tell the parameters apart -- k-points that all
+share one cos(ka), say -- is refused with an explanation, never
+silently pseudo-inverted; on the linear chain the reported covariance
+is held against its textbook closed form, exactly.
 
 ## Relation to existing tools
 
