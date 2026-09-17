@@ -33,8 +33,10 @@ from .spectrum import band_edges, bands, dos, fermi_level, k_path
 from .spin import PAULI, kane_mele, with_spin
 from .symmetry import find_point_group, symmetry_fold
 from .wannier import from_wannier90, load_wannier90_hr, save_wannier90_hr
+from .lab import (BandFit, band_information, design_kpoints,
+                  fit_bands)
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
@@ -54,4 +56,5 @@ __all__ = [
     "linear_chain", "two_site", "graphene", "ssh", "haldane",
     "chain_lead_blocks",
     "from_wannier90", "load_wannier90_hr", "save_wannier90_hr",
+    "BandFit", "fit_bands", "band_information", "design_kpoints",
 ]
