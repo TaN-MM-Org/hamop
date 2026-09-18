@@ -5,6 +5,26 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.10.0 - 2026-09-18
+
+Quantum geometry, and a future-proofing pass.
+
+- `geometry.quantum_geometric_tensor` / `quantum_metric` /
+  `quantum_weight`: the gauge-invariant quantum geometric tensor of
+  the occupied subspace via projector finite differences -- metric,
+  Berry curvature (in the package's own plaquette sign convention,
+  fixed by an independent-path identity), and the integrated
+  quantum-weight tensor with the bound tr K >= |Chern| (Provost &
+  Vallee (1980); Peotta & Torma, Nat. Commun. 6, 8944 (2015);
+  Onishi & Fu, PRX 14, 011052 (2024)).
+- CI now also runs on Python 3.14.
+- Anchors: three independent code paths agree (projector QGT,
+  two-band Bloch-sphere closed forms, plaquette Chern number); the
+  exact Gram-matrix chain tr g >= 2 sqrt(det g) >= |Omega| asserted
+  pointwise; the integrated bound in both Haldane phases; metric
+  symmetry and positive semidefiniteness; refusals at band
+  crossings and for overlap models.
+
 ## v0.9.0 - 2026-09-17
 
 Lab adaptability: fit the model to measured bands, and plan the

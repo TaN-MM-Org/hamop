@@ -273,7 +273,7 @@ exact result, not a stored number:
   chain, nonorthogonal chain, graphene, SSH and Haldane models, and
   flags an undersampled grid through its residual.
 
-Run them yourself: `pip install -e .[test]` then `pytest` — 142 tests
+Run them yourself: `pip install -e .[test]` then `pytest` — 147 tests
 across Python 3.9 through 3.13.
 
 ## Install and use
@@ -374,6 +374,34 @@ A design that cannot tell the parameters apart -- k-points that all
 share one cos(ka), say -- is refused with an explanation, never
 silently pseudo-inverted; on the linear chain the reported covariance
 is held against its textbook closed form, exactly.
+
+## Quantum geometry (new in v0.10)
+
+The Bloch states carry more geometry than their Berry curvature: the
+quantum metric measures how fast the occupied states turn as k
+moves, and it is the quantity behind flat-band superfluidity and the
+recent bounds tying a material's topology to its optical weight
+(Provost and Vallee, Commun. Math. Phys. 76, 289 (1980); Peotta and
+Torma, Nat. Commun. 6, 8944 (2015); Onishi and Fu, PRX 14, 011052
+(2024)). hamop now computes the full quantum geometric tensor of any
+model, gauge-invariantly:
+
+```python
+from hamop import haldane, quantum_metric, quantum_weight
+
+m = haldane(t1=-1.0, t2=0.1)
+g = quantum_metric(m, k=[0.3, 0.1])       # Angstrom^2
+out = quantum_weight(m, mesh=24)          # integrated over the zone
+print(out["tr_K"], ">=", abs(out["chern"]))   # holds, always
+```
+
+Three independent code paths keep it honest: the projector-based
+tensor, the two-band Bloch-sphere closed forms, and the package's
+own plaquette Chern number must all agree -- and the exact chain
+tr g >= 2 sqrt(det g) >= |Omega|, an identity of the underlying Gram
+matrix, is asserted pointwise across the zone. A band crossing
+through the occupied set is refused with the gap named, because the
+geometry there is undefined.
 
 ## Relation to existing tools
 
