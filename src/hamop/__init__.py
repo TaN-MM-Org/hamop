@@ -35,8 +35,10 @@ from .symmetry import find_point_group, symmetry_fold
 from .wannier import from_wannier90, load_wannier90_hr, save_wannier90_hr
 from .lab import (BandFit, band_information, design_kpoints,
                   fit_bands)
+from .geometry import (quantum_geometric_tensor, quantum_metric,
+                       quantum_weight)
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
@@ -57,4 +59,5 @@ __all__ = [
     "chain_lead_blocks",
     "from_wannier90", "load_wannier90_hr", "save_wannier90_hr",
     "BandFit", "fit_bands", "band_information", "design_kpoints",
+    "quantum_geometric_tensor", "quantum_metric", "quantum_weight",
 ]
