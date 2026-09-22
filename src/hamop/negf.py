@@ -30,6 +30,19 @@ __all__ = ["sancho_rubio", "transmission", "transmission_direct",
            "transmission_sparse", "multiprobe_transmission"]
 
 
+def _back(z, Hc, Sc):
+    """The reverse coupling block of z S - H: z S_c^dag - H_c^dag.
+
+    It is NOT the conjugate transpose of z S_c - H_c, because z is
+    complex (z = E + i eta); the two differ by 2 i eta S_c^dag, which
+    matters whenever the overlap couples the two blocks."""
+    Hc = np.asarray(Hc)
+    back = -Hc.conj().T.astype(complex)
+    if Sc is not None:
+        back = back + z * np.asarray(Sc).conj().T
+    return back
+
+
 def _sigma_at(sigma_int, i, E, n):
     """Retarded interaction self-energy of layer i at energy E, or None.
 
@@ -60,7 +73,7 @@ def sancho_rubio(E, H00, H01, S00=None, S01=None, eta=1e-6, maxiter=400,
     S01 = np.zeros_like(H01) if S01 is None else S01
     z = E + 1j * eta
     a = z * S01 - H01
-    b = a.conj().T
+    b = _back(z, H01, S01)
     es = e = z * S00 - H00
     I = np.eye(n, dtype=complex)
     for _ in range(maxiter):
@@ -84,8 +97,9 @@ def _lead_sigmas(E, lead_H00, lead_H01, lead_S00, lead_S01, eta):
     gR = sancho_rubio(E, lead_H00, lead_H01, lead_S00, lead_S01, eta)
     S01 = np.zeros_like(lead_H01) if lead_S01 is None else lead_S01
     tau = z * S01 - lead_H01
-    sigL = tau.conj().T @ gL @ tau
-    sigR = tau @ gR @ tau.conj().T
+    tau_b = _back(z, lead_H01, lead_S01)
+    sigL = tau_b @ gL @ tau
+    sigR = tau @ gR @ tau_b
     gamL = 1j * (sigL - sigL.conj().T)
     gamR = 1j * (sigR - sigR.conj().T)
     return sigL, sigR, gamL, gamR
@@ -139,14 +153,15 @@ def transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
                 Sc = coup_S[i - 1]
                 tau = (z * (np.zeros_like(coup_H[i - 1]) if Sc is None
                             else Sc) - coup_H[i - 1])
-                g_prev = np.linalg.inv(h_eff - tau.conj().T @ g_prev @ tau)
+                g_prev = np.linalg.inv(
+                    h_eff - _back(z, coup_H[i - 1], Sc) @ g_prev @ tau)
             Gs.append(g_prev)
         prod = Gs[-1]
         for i in range(N - 2, -1, -1):
             Sc = coup_S[i]
             tau = (z * (np.zeros_like(coup_H[i]) if Sc is None else Sc)
                    - coup_H[i])
-            prod = prod @ tau.conj().T @ Gs[i]
+            prod = prod @ _back(z, coup_H[i], Sc) @ Gs[i]
         G1N = prod          # G_{N,1}: right edge <- left edge
         T[iE] = float(np.real(np.trace(
             gamR @ G1N @ gamL @ G1N.conj().T)))
@@ -189,7 +204,7 @@ def transmission_direct(E_list, layers_H, coup_H, lead_H00, lead_H01,
                        - coup_H[i])
                 A[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = tau
                 A[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
-                    tau.conj().T
+                    _back(z, coup_H[i], Sc)
         A[offs[0]:offs[1], offs[0]:offs[1]] -= sigL
         A[offs[N - 1]:offs[N], offs[N - 1]:offs[N]] -= sigR
         G = np.linalg.inv(A)
@@ -245,7 +260,7 @@ def buttiker_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
                        - coup_H[i])
                 A[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = tau
                 A[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
-                    tau.conj().T
+                    _back(z, coup_H[i], Sc)
         A[offs[0]:offs[1], offs[0]:offs[1]] -= sigL
         A[offs[N - 1]:offs[N], offs[N - 1]:offs[N]] -= sigR
         A[offs[p]:offs[p + 1], offs[p]:offs[p + 1]] += \
@@ -289,7 +304,8 @@ def _assemble_device(E, layers_H, coup_H, layers_S, coup_S, eta,
             tau = (z * (np.zeros_like(coup_H[i]) if Sc is None else Sc)
                    - coup_H[i])
             A[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = tau
-            A[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = tau.conj().T
+            A[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
+                _back(z, coup_H[i], Sc)
     return A, offs
 
 
@@ -542,19 +558,26 @@ def device_ldos(E_list, layers_H, coup_H, lead_H00, lead_H01,
     """
     N = len(layers_H)
     layers_S_l = [None] * N if layers_S is None else layers_S
+    coup_S_l = [None] * (N - 1) if coup_S is None else coup_S
     out = np.empty((len(E_list), sum(len(h) for h in layers_H)))
     for iE, E in enumerate(E_list):
         G, offs, _, _ = device_greens(
             E, layers_H, coup_H, lead_H00, lead_H01, layers_S, coup_S,
             lead_S00, lead_S01, eta, sigma_int, attach_leads)
-        if layers_S is None:
+        if layers_S is None and coup_S is None:
             GS = G
         else:
+            # the full device overlap, inter-layer blocks included
             Sfull = np.eye(offs[-1], dtype=complex)
             for i in range(N):
                 if layers_S_l[i] is not None:
                     Sfull[offs[i]:offs[i + 1], offs[i]:offs[i + 1]] = \
                         layers_S_l[i]
+                if i < N - 1 and coup_S_l[i] is not None:
+                    Sc = np.asarray(coup_S_l[i], dtype=complex)
+                    Sfull[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = Sc
+                    Sfull[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
+                        Sc.conj().T
             GS = G @ Sfull
         out[iE] = -np.imag(np.diag(GS)) / np.pi
     return out
@@ -577,9 +600,9 @@ def bond_currents(E, layers_H, coup_H, lead_H00, lead_H01, eta=1e-9,
     computed by the independent `transmission` code path; and the
     first/last layers inject/drain exactly +T/-T.
 
-    Nonorthogonal bases are refused: the bond-current partition with
-    overlap requires energy-dependent bond operators this function
-    does not implement, and a wrong current map is worse than none.
+    Orthogonal bases only: the function takes no overlap arguments,
+    because the bond-current partition with overlap requires
+    energy-dependent bond operators it does not implement.
 
     Returns (J (n, n) antisymmetric, offs).
     """

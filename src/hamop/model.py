@@ -59,9 +59,13 @@ class TightBindingModel:
 
         image: integer lattice vector of the cell containing site j
         (all zeros for a finite system or an intra-cell bond).
-        H_block: (norb_i, norb_j) array.  S_block defaults to zero for
-        an inter-site block; identity is used automatically for on-site
-        blocks when no overlap is given anywhere (orthogonal basis).
+        H_block: (norb_i, norb_j) array.  S_block defaults to zero: a
+        block given without it adds nothing to S.  When no overlap is
+        given anywhere the basis is orthogonal and S = 1.  When the
+        model has overlap, each site's on-site overlap is the identity
+        unless an on-site S_block is given for that site, so on-site
+        terms may be added in several calls (e.g. a Zeeman term after
+        :func:`hamop.with_spin`) without changing S.
         """
         i, j = int(i), int(j)
         image = tuple(int(m) for m in np.atleast_1d(image))
@@ -96,8 +100,9 @@ class TightBindingModel:
         the corresponding velocity contribution i (E_n - E_m) X_nm to
         the interband matrix element, restoring transitions that the
         site-diagonal position approximation leaves dark (e.g. s -> p
-        on one atom).  Orthogonal bases only; the overlap generalization
-        is not implemented and is refused in the optics.
+        on one atom).  The same expression is used in a nonorthogonal
+        basis (see ``hamop.kubo``); ``kpm_sigma`` refuses overlap models
+        altogether.
         """
         i = int(i)
         X = np.asarray(X, dtype=complex)
@@ -132,30 +137,29 @@ class TightBindingModel:
             d = d + np.asarray(image, dtype=float) @ self.cell
         return d
 
+    def _onsite_S_given(self):
+        """Sites that carry an explicitly given on-site overlap block."""
+        return {i for i, j, im, _, Sb in self._hops
+                if i == j and not any(im) and Sb is not None}
+
     def _terms(self):
         """Yield (oi, oj, d, Hb, Sb) for every block and its implied
         Hermitian partner, exactly once each."""
         overlap = self.has_overlap()
-        seen_onsite_S = set()
         for i, j, image, Hb, Sb in self._hops:
             oi, oj = self.offsets[i], self.offsets[j]
             d = self._displacement(i, j, image)
             onsite = (i == j) and not any(image)
             if Sb is None:
-                if onsite and overlap:
-                    Sb = np.eye(self.norb[i], dtype=complex)
-                else:
-                    Sb = np.zeros_like(Hb)
+                Sb = np.zeros_like(Hb)
             if onsite:
-                seen_onsite_S.add(i)
                 yield oi, oj, d, Hb, Sb
             else:
                 yield oi, oj, d, Hb, Sb
                 yield oj, oi, -d, Hb.conj().T, Sb.conj().T
         if overlap:
-            # sites whose on-site block was never given still need S = 1
-            given = {i for i, j, im, _, _ in self._hops
-                     if i == j and not any(im)}
+            # sites without an explicit on-site overlap get S = 1, once
+            given = self._onsite_S_given()
             for i in range(len(self.norb)):
                 if i not in given:
                     oi = self.offsets[i]

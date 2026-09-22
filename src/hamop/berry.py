@@ -76,16 +76,14 @@ def _bloch_periodic(model, k):
         ni, nj = Hb.shape
         onsite = (i == j) and not any(image)
         if Sb is None:
-            Sb = (np.eye(ni, dtype=complex) if (onsite and overlap)
-                  else np.zeros_like(Hb))
+            Sb = np.zeros_like(Hb)
         H[oi:oi + ni, oj:oj + nj] += ph * Hb
         S[oi:oi + ni, oj:oj + nj] += ph * Sb
         if not onsite:
             H[oj:oj + nj, oi:oi + ni] += np.conj(ph) * Hb.conj().T
             S[oj:oj + nj, oi:oi + ni] += np.conj(ph) * Sb.conj().T
     if overlap:
-        given = {i for i, j, im, _, _ in model._hops
-                 if i == j and not any(im)}
+        given = model._onsite_S_given()
         for i in range(len(model.norb)):
             if i not in given:
                 oi = model.offsets[i]

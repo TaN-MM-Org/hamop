@@ -54,6 +54,8 @@ def fermi_level(model, filling, mesh=None, kpts=None, weights=None,
     """Chemical potential at which the mean band occupation per cell
     equals ``filling`` (states per cell, spin not included), by
     bisection on the Fermi-Dirac-weighted eigenvalue count."""
+    if T < 0:
+        raise ValueError("T must be >= 0 K")
     kpts, weights = _grid(model, mesh, kpts, weights)
     eigs = _eigs(model, kpts, thresh)
 

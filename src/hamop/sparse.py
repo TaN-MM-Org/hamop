@@ -338,6 +338,8 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
     omega = np.atleast_1d(np.asarray(omega, dtype=float))
     if np.any(omega <= 0):
         raise ValueError("omega must be positive photon energies")
+    if T < 0:
+        raise ValueError("T must be >= 0 K")
     KB = 8.617333262e-5  # eV / K (CODATA 2018)
     H, _ = bloch_sparse(model, None)
     v = _velocity_sparse(model, direction)

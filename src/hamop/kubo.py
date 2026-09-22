@@ -33,6 +33,17 @@ __all__ = ["sigma_optical", "sigma_tensor", "carrier_count",
 KB = 8.617333262e-5  # eV / K
 
 
+def _check_T(T, strict=False):
+    """Refuse temperatures the Fermi factors cannot use: T < 0 always,
+    and T = 0 where -df/de must be sampled on a k-mesh (strict)."""
+    if strict and not T > 0:
+        raise ValueError("T must be > 0 K here: the Fermi-surface "
+                         "factor -df/de is sampled on the k-mesh and "
+                         "needs thermal smearing")
+    if T < 0:
+        raise ValueError("T must be >= 0 K")
+
+
 def _dipole_term(model, c, e, direction):
     """Intra-atomic dipole contribution to the velocity matrix element,
     i (E_n - E_m) <n|X_a|m>, from v = (i/hbar)[H, r] with the on-site
@@ -67,6 +78,7 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
     omega = np.asarray(omega, dtype=float)
     if np.any(omega <= 0):
         raise ValueError("omega must be positive photon energies")
+    _check_T(T)
     if mesh is not None or kpts is not None:
         if mesh is not None:
             kpts, weights = model.monkhorst_pack(mesh)
@@ -138,6 +150,7 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
     """
     a, b = directions
     omega = np.atleast_1d(np.asarray(omega, dtype=float))
+    _check_T(T)
     if mesh is not None or kpts is not None:
         if mesh is not None:
             kpts, weights = model.monkhorst_pack(mesh)
@@ -181,10 +194,16 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
 
 def carrier_count(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
                   spin=2, thresh=1e-10):
-    """Mean number of occupied states per unit cell (spin included)."""
+    """Mean number of occupied states per unit cell (spin included).
+
+    A periodic model needs ``mesh`` or ``kpts``; a finite model
+    (cell=None) is evaluated at its single k = 0."""
+    _check_T(T)
     if mesh is not None:
         kpts, weights = model.monkhorst_pack(mesh)
     elif kpts is None:
+        if model.cell is not None:
+            raise ValueError("periodic model: give mesh or kpts")
         kpts, weights = [None], [1.0]
     elif weights is None:
         weights = np.full(len(kpts), 1.0 / len(kpts))
@@ -212,7 +231,11 @@ def drude_weight(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
     is pinned in the tests to the closed form of the half-filled chain,
     D = 8 spin |t| a  (from (4 pi / a) (a / 2 pi) * integral dk
     v(k)^2 delta(E(k)) with v = -2 t a sin ka).
+
+    T must be > 0: the factor -df/de is sampled on the k-points, so it
+    needs thermal smearing (T = 0 is refused).
     """
+    _check_T(T, strict=True)
     if mesh is not None:
         kpts, weights = model.monkhorst_pack(mesh)
         area = model.cell_volume

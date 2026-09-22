@@ -38,7 +38,7 @@ from .lab import (BandFit, band_information, design_kpoints,
 from .geometry import (quantum_geometric_tensor, quantum_metric,
                        quantum_weight)
 
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",

@@ -14,10 +14,10 @@ The field strength is given as ``phi``: flux per unit area in units of
 the flux quantum per Angstrom^2 (dimensionless), i.e. the phase around
 a region of area F (Angstrom^2) is exactly 2 pi phi F.
 
-Finite models only.  A uniform field breaks lattice periodicity, and
-magnetic unit cells (Hofstadter physics at rational flux) are not
-implemented -- a periodic model is refused with an explicit error
-rather than silently mistreated.
+``with_peierls`` takes finite models only: a uniform field breaks
+lattice periodicity, so a periodic model is refused with an explicit
+error rather than silently mistreated.  Periodic 2D models at rational
+flux go through ``magnetic_supercell`` (Hofstadter magnetic cells).
 """
 from __future__ import annotations
 
@@ -57,13 +57,14 @@ def with_peierls(model, phi, gauge="landau"):
     Overlap blocks acquire the same phase (the substitution acts on the
     basis functions).  Dipole blocks are on-site and unchanged.
     Periodic models are refused: a uniform field breaks lattice
-    periodicity, and magnetic unit cells are not implemented.
+    periodicity; use :func:`magnetic_supercell` for a periodic 2D model
+    at rational flux.
     """
     if model.cell is not None:
         raise ValueError(
             "with_peierls works on finite models only; a uniform field "
-            "breaks lattice periodicity and magnetic unit cells "
-            "(Hofstadter) are not implemented")
+            "breaks lattice periodicity. For a periodic 2D model at "
+            "rational flux p/q use hamop.magnetic_supercell")
     if model.positions.shape[1] < 2:
         raise ValueError("need at least two Cartesian coordinates for "
                          "an out-of-plane field")

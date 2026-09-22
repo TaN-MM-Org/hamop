@@ -39,7 +39,9 @@ PAULI = {
 def with_spin(model):
     """Spinful copy of a spinless model: every H and S block is tensored
     with the 2 x 2 identity (spin innermost), so each band becomes an
-    exact doublet.  Spin-dependent terms are then added to the returned
+    exact doublet.  Intra-atomic dipole blocks (``set_dipole``) are
+    carried over the same way, since the position operator does not
+    act on spin.  Spin-dependent terms are then added to the returned
     model with ordinary ``add_hop`` calls on 2 norb x 2 norb blocks,
     e.g. ``np.kron(block, PAULI["z"])``."""
     m = TightBindingModel(positions=model.positions.copy(),
@@ -49,6 +51,9 @@ def with_spin(model):
     for i, j, image, Hb, Sb in model._hops:
         m.add_hop(i, j, image, np.kron(Hb, PAULI["0"]),
                   None if Sb is None else np.kron(Sb, PAULI["0"]))
+    for i, X in model._dipoles.items():
+        m.set_dipole(i, np.stack([np.kron(X[:, :, a], PAULI["0"])
+                                  for a in range(X.shape[2])], axis=-1))
     return m
 
 
