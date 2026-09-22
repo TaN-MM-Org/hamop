@@ -5,6 +5,86 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.10.1 - 2026-09-22
+
+Bug fixes, a rewritten README, and CI coverage of every supported
+Python version.
+
+### Fixed
+
+- Overlap models: an on-site block added without its own `S_block`
+  added another identity to the on-site overlap each time. Adding an
+  on-site energy or a Zeeman term in a second `add_hop` call (for
+  example after `with_spin`) therefore changed S and gave wrong bands.
+  Each site's on-site overlap is now the identity unless an on-site
+  `S_block` is given for it (`TightBindingModel` and the
+  periodic-gauge assembly used by the Berry functions).
+- NEGF with overlap: the reverse coupling block of z S - H was built as
+  the conjugate transpose of z S - H, i.e. with conj(z). It is now
+  z S^dag - H^dag in `sancho_rubio`, the lead self-energies,
+  `transmission`, `transmission_direct`, `transmission_sparse`,
+  `buttiker_transmission`, `scba_transmission`,
+  `multiprobe_transmission`, `device_greens` and `device_ldos`. The
+  error was of order eta * S (negligible at the default eta = 1e-6,
+  visible at the finite eta used for local DOS). Orthogonal models
+  are unaffected.
+- `device_ldos` ignored the inter-layer overlap blocks (`coup_S`) in
+  its Mulliken LDOS; they are now included.
+- `with_spin` dropped intra-atomic dipole blocks; they are now copied
+  as kron(X, identity) per direction.
+- `carrier_count` on a periodic model without `mesh` or `kpts`
+  silently summed k = 0 only; it now refuses, like `dos` and
+  `sigma_optical`.
+- `drude_weight` returned NaN at T = 0 and a negative weight at
+  T < 0; it now refuses T <= 0. `sigma_optical`, `sigma_tensor`,
+  `carrier_count`, `fermi_level` and `kpm_sigma` now refuse T < 0.
+- Stale text: the `with_peierls` error message and module docstring
+  said magnetic unit cells were not implemented (they are:
+  `magnetic_supercell`); the `set_dipole` docstring said overlap was
+  refused in the optics (it is supported); the `bond_currents`
+  docstring said overlap was "refused" (the function simply takes no
+  overlap arguments).
+
+### Tests
+
+- New `tests/test_regressions.py` with six tests, each failing on
+  0.10.0: `test_onsite_blocks_in_two_calls_do_not_double_the_overlap`,
+  `test_with_spin_keeps_the_dipole_blocks`,
+  `test_device_ldos_uses_the_inter_layer_overlap`,
+  `test_carrier_count_refuses_a_periodic_model_without_a_grid`,
+  `test_temperatures_the_fermi_factors_cannot_use_are_refused`,
+  `test_negf_with_overlap_builds_z_s_minus_h_at_finite_eta`.
+  153 tests in total (147 before).
+- CI now runs Python 3.10 as well (3.9 to 3.14), plus an
+  `oldest-dependencies` job with NumPy 1.22.0 and SciPy 1.8.0 on
+  Python 3.10.
+
+### Changed
+
+- README rewritten for non-specialists: a word guide, eight examples
+  with their exact output (checked by running them), every public
+  name, the refusals, and the checks with the tolerances the tests
+  actually use.
+
+### Corrections to earlier notes
+
+- The 0.10.0 README said "147 tests across Python 3.9 through 3.13";
+  CI then ran 3.9 and 3.11-3.14 (not 3.10). Its Status section still
+  said "v0.8.0" and "136 tests".
+- Earlier text called several checks "exact" or "machine precision"
+  where the tests use tolerances: the Wannier90 save/load round trip
+  is checked to 1e-9 per block (the file stores 10 decimals), not
+  exactly (0.7.0); the imported model's optical conductivity to 1e-10
+  (0.7.0); the chain fit covariance to 1e-6 relative, not "exactly"
+  (0.9.0); the C6-folded chemical potential to 1e-9, not 1e-12, and
+  the time-reversal-folded Drude weight to 1e-10, not 1e-12.
+- 0.7.0 said "every refusal fires on a deliberately corrupted file";
+  the tests cover four kinds of corrupted file and a mismatched cell.
+- 0.8.0 said the along-bond dipole component "cancels to 1e-8"; the
+  test checks it below 1e-8 times the perpendicular component.
+- 0.6.0 said nonorthogonal bases are "refused" by `bond_currents`; no
+  error is raised, the function has no overlap arguments.
+
 ## v0.10.0 - 2026-09-18
 
 Quantum geometry, and a future-proofing pass.
