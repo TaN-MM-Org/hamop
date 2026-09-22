@@ -2,7 +2,8 @@
 forms: the site-diagonal position approximation leaves an on-site
 s -> p transition exactly dark, the dipole block makes it bright with
 the exact peak height, a dipole that commutes with H changes nothing,
-and the overlap case is refused."""
+the same term works in a nonorthogonal basis, and a non-Hermitian
+dipole block is refused."""
 import numpy as np
 import pytest
 
