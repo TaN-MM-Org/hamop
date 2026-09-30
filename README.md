@@ -16,7 +16,8 @@ computes:
 - how strongly the material absorbs light at each photon energy (the
   **optical conductivity**);
 - how easily electrons pass through a small device placed between two
-  wires (the **transmission**);
+  wires (the **transmission**), and from it the conductance, current
+  and thermovoltage a measurement at a given temperature would report;
 - topological numbers such as the **Chern number**, and related
   geometric quantities of the electron states.
 
@@ -47,6 +48,7 @@ material come from your own calculation or measurement.
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
 - [How the results are checked](#how-the-results-are-checked)
+- [What changed in 0.11.0](#what-changed-in-0110)
 - [Bugs fixed in 0.10.1](#bugs-fixed-in-0101)
 - [Limits](#limits)
 - [Relation to existing tools](#relation-to-existing-tools)
@@ -100,6 +102,15 @@ material come from your own calculation or measurement.
   between two semi-infinite **leads** (wires), and is cut into
   **principal layers** that couple only to their nearest neighbours.
   The method is the **nonequilibrium Green function (NEGF)** method.
+- **Conductance, Seebeck coefficient, Lorenz ratio** -- at a finite
+  temperature `T` a measurement averages `T(E)` over a window of a few
+  `kT` around the chemical potential (`k` is Boltzmann's constant). The
+  conductance is that average times the number of spin directions,
+  in units of `e^2/h`. The Seebeck
+  coefficient is the voltage that appears per kelvin of temperature
+  difference across the device. The Lorenz ratio is the heat
+  conductance carried by the electrons divided by `G T`; for a smooth
+  `T(E)` it is close to `(pi^2/3)(k/e)^2 = 2.443e-8 V^2/K^2`.
 - **Green function** -- the matrix `(zS - H)^-1` at the complex
   energy `z = E + i eta`. Its imaginary part gives the local density
   of states (the DOS on each orbital, **LDOS**), and the transmission
@@ -151,11 +162,19 @@ Units and conventions, stated once:
 - Magnetic flux for `with_peierls` is given per square Angstrom, in
   units of the flux quantum; `magnetic_supercell` takes the flux
   `p/q` per unit cell.
+- Temperature `T = 0` means the exact step occupation; a level exactly
+  at `mu` counts as half occupied (the value the Fermi function has at
+  `mu` for every `T > 0`).
+- Transport at finite temperature: conductance in units of `e^2/h`
+  (multiply by `e^2/h = 3.874e-5 S` for siemens), current in units of
+  `e^2/h` times 1 V (multiply by the same number for amperes), Seebeck
+  coefficient in V/K, Lorenz ratio in V^2/K^2. `spin=2` counts both
+  spin directions, as in the optics.
 
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with hamop 0.10.1. The model parameters are illustrative
+printed with hamop 0.11.0. The model parameters are illustrative
 values, not fitted to any material, unless the text says otherwise.
 
 ### 1. Graphene: bands and the absorption plateau
@@ -427,6 +446,111 @@ vectors or the orbital centres. You supply the lattice vectors
 them, but optical matrix elements do, so give the true centres when
 you need optics.
 
+### 9. Transport at a finite temperature: conductance, current, thermovoltage
+
+```python
+import numpy as np
+from hamop import (chain_lead_blocks, transmission, landauer_conductance,
+                   landauer_current, thermoelectric)
+
+t, eps = -1.0, 0.8                     # the impurity chain of example 4
+H00, H01 = chain_lead_blocks(t=t)
+layers, coup = [H00, H00 + eps, H00], [H01, H01]
+E = np.arange(-1.0, 1.6, 0.002)        # energy grid, eV
+T_E = transmission(E, layers, coup, H00, H01, eta=1e-8)
+
+mu = 0.3
+exact = 2 * (4 - mu**2) / ((4 - mu**2) + eps**2)   # 2 T(mu), spin 2
+for temp in (30.0, 300.0):
+    G = landauer_conductance(E, T_E, mu, T=temp)
+    print(f"T = {temp:5.1f} K: G = {G:.6f} e^2/h   (2 T(mu) = {exact:.6f})")
+
+r = thermoelectric(E, T_E, mu, T=300.0)
+print(f"Seebeck coefficient: {r['S'] * 1e6:+.4f} microvolt/K")
+print(f"Lorenz ratio: {r['lorenz']:.4e} V^2/K^2")
+
+I = landauer_current(E, T_E, mu_L=mu + 0.05, mu_R=mu - 0.05, T=300.0)
+print(f"current at 0.1 V bias: {I:.6f} x e^2/h x 1 V")
+```
+
+```
+T =  30.0 K: G = 1.718680 e^2/h   (2 T(mu) = 1.718681)
+T = 300.0 K: G = 1.718534 e^2/h   (2 T(mu) = 1.718681)
+Seebeck coefficient: +0.1589 microvolt/K
+Lorenz ratio: 2.4423e-08 V^2/K^2
+current at 0.1 V bias: 0.171848 x e^2/h x 1 V
+```
+
+`transmission` gives `T(E)` at the energies you choose; the three
+functions used here turn it into what an experiment at temperature
+`T` reports. At 30 K the conductance agrees with `2 T(mu)` of the
+closed form to about 1e-6; at 300 K the thermal average over the curved
+`T(E)` lowers it slightly. `T(E)` falls with energy at `mu = 0.3` eV,
+so the Seebeck coefficient is positive (hole-like); the rough
+low-temperature estimate `-(pi^2/3)(k^2 T/e) d ln T/dE` (the Mott
+formula) gives +0.158 microvolt/K here. The energy grid must reach 30
+`kT` beyond the chemical potentials and resolve `kT`; otherwise the
+functions refuse and say how to fix the grid.
+
+### 10. Reading a Wannier90 `tb.dat` file (cell and centres included)
+
+```python
+import os, tempfile
+import numpy as np
+import hamop
+
+# A seedname_tb.dat in the Wannier90 layout: date line, lattice vectors
+# (Angstrom), num_wann, nrpts, degeneracies, then H(R) and r(R) blocks.
+# Here: one orbital centred at x = 0.4 Angstrom in a chain of period 2.0,
+# on-site energy 0.1 eV and hopping -1.0 eV to both neighbours.
+text = """ written by hand
+  2.0 0.0 0.0
+  0.0 10.0 0.0
+  0.0 0.0 10.0
+ 1
+ 3
+    1    1    1
+
+   -1    0    0
+    1    1   -0.10000000E+01  0.00000000E+00
+    0    0    0
+    1    1    0.10000000E+00  0.00000000E+00
+    1    0    0
+    1    1   -0.10000000E+01  0.00000000E+00
+
+   -1    0    0
+    1    1    0.00000000E+00  0.0  0.0  0.0  0.0  0.0
+    0    0    0
+    1    1    0.40000000E+00  0.0  0.0  0.0  0.0  0.0
+    1    0    0
+    1    1    0.00000000E+00  0.0  0.0  0.0  0.0  0.0
+"""
+path = os.path.join(tempfile.mkdtemp(), "chain_tb.dat")
+with open(path, "w") as fh:
+    fh.write(text)
+
+m = hamop.from_wannier90_tb(path)       # cell and centre come from the file
+print("periodic directions:", m.cell.shape[0], " cell:", m.cell.ravel(),
+      " centre:", m.positions.ravel())
+k = np.linspace(-1.5, 1.5, 7)[:, None]
+ref = hamop.linear_chain(t=-1.0, e0=0.1, a=2.0)
+diff = np.abs(hamop.bands(m, k) - hamop.bands(ref, k)).max()
+print("bands agree with linear_chain to 1e-12 eV:", diff < 1e-12)
+```
+
+```
+periodic directions: 1  cell: [2.]  centre: [0.4]
+bands agree with linear_chain to 1e-12 eV: True
+```
+
+`seedname_tb.dat` (written by Wannier90 with `write_tb = true`) holds
+the lattice vectors, the Hamiltonian `H(R)` and the position matrix
+elements `<m0|r|nR>` in one file, so `from_wannier90_tb` needs no
+cell and no centres from you. The orbital positions are taken from
+the diagonal elements `<m0|r|m0>`; the off-diagonal ones are read by
+`load_wannier90_tb` but not used (see Limits). Directions in which no
+hopping occurs are dropped, so this chain imports as a 1D model.
+
 ## What is in the package
 
 Each function's docstring (`help(hamop.sigma_optical)`, for example)
@@ -505,7 +629,10 @@ gives its inputs, units and conventions.
   `transmission_direct` and `transmission_sparse` compute the same
   quantity by dense and by sparse inversion. `sancho_rubio` gives
   the surface Green function of a lead (Lopez Sancho, Lopez Sancho
-  and Rubio, J. Phys. F 15, 851 (1985)).
+  and Rubio, J. Phys. F 15, 851 (1985)); every result is checked
+  against the lead's own Dyson equation, and when the decimation
+  fails that check it is recomputed from the lead's decaying modes
+  (Lee and Joannopoulos, Phys. Rev. B 23, 4988 and 4997 (1981)).
 - `principal_layers` -- cuts a finite model into layers along an axis
   and checks that no coupling skips a layer.
 - `buttiker_transmission` -- one dephasing probe, an imaginary
@@ -520,6 +647,13 @@ gives its inputs, units and conventions.
   115117 (2007)).
 - `transmission`, `transmission_direct` and `transmission_sparse` also
   accept your own self-energy per layer (`sigma_int`).
+- `landauer_conductance`, `landauer_current`, `thermoelectric` -- the
+  conductance, the current at a finite bias, and the Seebeck
+  coefficient, electronic heat conductance and Lorenz ratio at a
+  finite temperature, from `T(E)` sampled on an energy grid (example
+  9; formulas from Datta, *Electronic Transport in Mesoscopic
+  Systems*, Cambridge University Press (1995), ch. 2, and Sivan and
+  Imry, Phys. Rev. B 33, 551 (1986)).
 
 **Large systems**
 
@@ -544,6 +678,9 @@ gives its inputs, units and conventions.
   grid, transform to real space, and evaluate at any `k`.
 - `from_wannier90`, `load_wannier90_hr`, `save_wannier90_hr` -- read
   and write the Wannier90 `seedname_hr.dat` format.
+- `from_wannier90_tb`, `load_wannier90_tb` -- read the Wannier90
+  `seedname_tb.dat` format, which also carries the lattice vectors and
+  the position matrix elements (example 10).
 
 **Fitting to measurements**
 
@@ -590,7 +727,20 @@ doubtful number, when:
 - a Wannier90 file is malformed (wrong counts, duplicate or missing
   elements, a short degeneracy list, an orbital index out of range),
   its Hamiltonian is not Hermitian, or the cell does not match the
-  file;
+  file; a `tb.dat` file lacks its position section, lists different
+  R vectors in its two sections, or has a cell that cannot be cut to
+  the number of periodic directions without changing its geometry;
+- explicit k-point weights do not match the k-points in number, are
+  negative, or do not add up to 1;
+- the lead surface Green function (`sancho_rubio`, used by every
+  transport function) fails its Dyson-equation check by both routes
+  (decimation and decaying modes); this always happens at `eta = 0`
+  inside a lead band;
+- the energy grid given to `landauer_conductance`, `landauer_current`
+  or `thermoelectric` does not reach 30 `kT` beyond the chemical
+  potentials, has a step larger than `kT` there, is not increasing,
+  or `T <= 0`; `thermoelectric` also refuses when nothing is
+  transmitted in the Fermi window;
 - a planned or measured set of band energies cannot tell the fit
   parameters apart, or there are fewer measurements than parameters;
 - a block has the wrong shape, an on-site or dipole block is not
@@ -605,7 +755,7 @@ doubtful number, when:
 
 ## How the results are checked
 
-153 automated tests run on every change, on Python 3.9, 3.10, 3.11,
+171 automated tests run on every change, on Python 3.9, 3.10, 3.11,
 3.12, 3.13 and 3.14, and once more on Python 3.10 with the oldest
 NumPy (1.22.0) and SciPy (1.8.0) the package allows. The numerical
 tests compare the package with a closed-form result, a symmetry, or a
@@ -622,6 +772,12 @@ tolerances the tests use:
 - Graphene's bands touch at K to 1e-9 and sit at `-/+ 3|t|` at the zone
   centre to 1e-12. Its optical conductivity at 1.0 and 1.3 eV is
   within 5 % of `e^2/(4 hbar)`.
+- At `T = 0` a level exactly at `mu` is half occupied: the optics
+  then equal the `T = 1 K` result to 1e-12 and half the result with
+  `mu` in the gap, and `carrier_count` gives exactly 1 (spin 2 times
+  1/2). Wrong-length, negative or unnormalized k-point weights are
+  refused by `dos`, `sigma_optical`, `drude_weight`, `carrier_count`
+  and `fermi_level`.
 - The two-site molecule absorbs at `2|t|` (within 2e-3 eV) with the
   hand-derived peak height to 1e-3 relative; the Lorentzian lineshape
   also gives its hand-derived peak height to 1e-3.
@@ -704,6 +860,26 @@ tolerances the tests use:
   and every cut carries T to 1e-6.
 - `principal_layers` reproduces hand-built blocks exactly and refuses
   layers that are too thin.
+- `sancho_rubio` refuses at `eta = 0` inside the band; at `eta = 0`
+  outside the band it matches the real closed form to 1e-12, and at
+  `eta = 1e-12` inside the band the complex one to 1e-10. At the band
+  centre and other lead resonances (E = 0, 8.9e-16, 1e-10, 1.0 eV)
+  with `eta = 1e-8` it matches the closed form at the same complex
+  energy to 1e-8 for the chain, the chain with overlap and a two-site
+  layer; the impurity chain's `T(E)` there matches its closed form to
+  1e-7, and the 30 K conductance on a grid containing E = 0 matches
+  the one from the closed-form `T(E)` to 1e-7.
+- Finite temperature: for a constant `T(E) = tau` the conductance is
+  `spin tau` to 1e-10, the Seebeck coefficient is below 1e-12 V/K and
+  the Lorenz ratio equals `(pi^2/3)(k/e)^2` to 1e-9 relative at 30,
+  300 and 900 K (exact for constant `T(E)`); for a linear `T(E)` the
+  Seebeck coefficient equals the Mott form and the Lorenz ratio its
+  closed form, both to 1e-9 relative (exact for linear `T(E)`); the
+  current through a constant `T(E)` is `spin tau V` to 1e-10 and odd
+  in the bias. For the impurity chain at 30 K the conductance matches
+  `2 T(mu)` of the closed form to 1e-5 and `I/V` at a 0.1 mV bias
+  matches `G` to 1e-6 relative; a band-edge step matches
+  `2 [f(-2|t|) - f(2|t|)]` to 1e-4 on a 1e-5 eV grid.
 
 **Large systems, k-grids, interpolation, files, fitting**
 
@@ -721,7 +897,12 @@ tolerances the tests use:
 - Fourier interpolation reproduces the bands to 1e-12 for five models
   and flags a too-coarse grid.
 - A hand-written graphene `hr.dat` reproduces `graphene()` bands to
-  1e-12 and its optical conductivity to 1e-10; a save/load round trip
+  1e-12 and its optical conductivity to 1e-10; a hand-written graphene
+  `tb.dat` (Wannier90 number formats, a degeneracy-2 shell, centres
+  off the plane) reproduces the bands to 1e-12 and both in-plane
+  optical conductivities to 1e-7 relative (the file stores 8
+  significant digits), while moving the centres to the origin changes
+  the optics by more than 1 %; a save/load round trip
   keeps each block to 1e-9 (the file stores 10 decimals); four kinds
   of corrupted file (too few lines, a duplicate element, a short
   degeneracy list, a non-Hermitian Hamiltonian) and a mismatched cell
@@ -730,6 +911,40 @@ tolerances the tests use:
   relative; 300 seeded simulated experiments match the reported error
   bars within 15 %; a design that cannot separate the parameters is
   refused.
+
+## What changed in 0.11.0
+
+**New**
+
+- Finite-temperature transport from `T(E)`: `landauer_conductance`,
+  `landauer_current` and `thermoelectric` (example 9).
+- `from_wannier90_tb` reads a Wannier90 `seedname_tb.dat` file,
+  taking the lattice vectors and the orbital centres from the file
+  itself (example 10).
+
+**Silent wrong answers that are now errors or fixed**
+
+- `sancho_rubio` could return a wrong lead surface Green function
+  without warning, in two ways. At `eta = 0` inside a band the
+  decimation never converges and the last iterate was returned: the
+  chain lead at `E = 0.5` gave `0.924` instead of `0.25 - 0.968i`, and
+  `transmission` gave `T = 0` inside the band; this now raises an
+  error. And when `E` equals an eigenvalue of the lead layer (the band
+  centre `E = 0` of the chain) the decimation loses up to
+  `log10(1/eta)` digits and can settle on a wrong answer: at
+  `eta = 1e-8` it gave `-6.7e7 i` instead of `-i`, the impurity chain's
+  `T(0)` came out 1.4e-15 instead of 0.862, and at the default
+  `eta = 1e-6` `T(0)` was off by 5e-6. Every result is now checked
+  against the lead's Dyson equation and, if the check fails,
+  recomputed from the lead's decaying modes.
+- At `T = 0`, a level exactly at `mu` gave `0/0` and NaN in
+  `sigma_optical`, `sigma_tensor`, `carrier_count` and friends. It is
+  now half occupied (for the two-level test atom, `carrier_count` goes
+  from NaN to 1.0).
+- Explicit k-point weights were not checked. A shorter weight list
+  silently dropped k-points (the chain's DOS at 2 eV on a 10-point
+  grid came out 0.0 instead of 0.798 with only 3 weights), and weights
+  summing to 2 doubled the result. Both are now refused.
 
 ## Bugs fixed in 0.10.1
 
@@ -793,6 +1008,22 @@ These are deliberate choices, not oversights:
   not implemented).
 - The quantum-geometry functions and the Berry curvature dipole
   handle orthogonal bases only.
+- `landauer_conductance`, `landauer_current` and `thermoelectric` take
+  `T(E)` as given: a current at finite bias uses the same `T(E)` for
+  every bias unless you recompute it (no self-consistent potential
+  drop), and the heat conductance is the electrons' part only (no
+  phonons). A step in `T(E)` inside the Fermi window (a band edge)
+  converges only linearly in the grid step.
+- `from_wannier90_tb` uses the diagonal position elements (the
+  centres) and ignores the off-diagonal ones, in line with the
+  site-diagonal position approximation above. Both Wannier90 readers
+  divide every element by the degeneracy listed in the file; files
+  written with `write_ndegen_applied = true` have not been tested.
+- The lead surface Green function needs `eta > 0` inside a lead band.
+  Its check (the Dyson-equation residual below 1e-10) bounds the
+  error only up to the conditioning of that equation, which grows as
+  `eta` shrinks; at `eta = 1e-8` the tests find errors below 1e-8,
+  smaller than the shift the broadening itself causes.
 - The package ships no material constants. The only physical constant
   in the code is the Boltzmann constant (CODATA 2018).
 

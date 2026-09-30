@@ -5,6 +5,101 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## v0.11.0 - 2026-09-30
+
+Finite-temperature transport, a one-file Wannier90 import, and three
+silent wrong answers turned into errors or correct numbers.
+
+### Added
+
+- `landauer_conductance`, `landauer_current`, `thermoelectric` (new
+  module `hamop.landauer`): conductance (units of e^2/h), current at a
+  finite bias (units of e^2/h times 1 V), Seebeck coefficient (V/K),
+  electronic heat conductance at zero current ((e^2/h) V^2/K) and
+  Lorenz ratio (V^2/K^2) from a transmission T(E) sampled on an
+  energy grid, by trapezoid sums of the Landauer integrals (Datta,
+  Electronic Transport in Mesoscopic Systems (1995), ch. 2; Sivan and
+  Imry, Phys. Rev. B 33, 551 (1986)). The grid is checked: it must
+  reach 30 kT beyond every chemical potential and have steps of at
+  most kT there. No constant beyond the Boltzmann constant is used.
+- `load_wannier90_tb`, `from_wannier90_tb`: read the Wannier90
+  `seedname_tb.dat` file (lattice vectors, H(R) and position matrix
+  elements; layout from the Wannier90 user guide and the writer
+  `hamiltonian_write_tb`). The model takes the cell and the orbital
+  centres (diagonal position elements at R = 0) from the file; both
+  H(R) and r(R) are divided by the degeneracy of R. The off-diagonal
+  position elements are returned by the loader but not used (the
+  package's optics use the site-diagonal position operator).
+  Trailing lattice directions without hopping are dropped (a 2D
+  material from a 3D code imports as 2D), and a cell that cannot be
+  cut that way without changing its geometry is refused.
+- `hamop.model.fermi_dirac` and `hamop.model.check_kgrid`: the one
+  Fermi function and the one k-weight check that the spectrum, Kubo
+  and KPM modules now share.
+
+### Fixed
+
+- `sancho_rubio` could return a wrong surface Green function without
+  warning. (1) It returned the last iterate when the decimation had
+  not converged after `maxiter` steps, which always happens at
+  `eta = 0` inside a lead band. (2) When E equals an eigenvalue of the
+  lead layer (E = 0 for a chain with zero on-site energy) the first
+  decimation steps divide by a number of size eta; with a small eta
+  the decimation loses up to log10(1/eta) digits and can pass its own
+  convergence test at a wrong answer. Every result is now checked
+  against the lead's Dyson equation g = (A - a g b)^-1 (relative
+  residual <= `check_tol` = 1e-10, new keyword) and for retardedness
+  (i (g - g^dag) has no negative eigenvalues); a decimation that fails
+  is recomputed from the lead's decaying modes (generalized
+  eigenproblem of b + A lam + a lam^2 = 0, mode-matching form of Lee
+  and Joannopoulos, Phys. Rev. B 23, 4988 and 4997 (1981)), which
+  must pass the same checks. If neither route passes, RuntimeError is
+  raised.
+- At `T = 0` a level exactly at `mu` gave (e - mu)/(kB T) = 0/0 = NaN
+  in `sigma_optical`, `sigma_tensor` and `carrier_count`, with
+  divide-by-zero warnings at every `T = 0` call; `fermi_level` and
+  `kpm_sigma` used the same expression. `T = 0` is now the exact step, with occupation 1/2 at `mu`.
+- Explicit k-point weights were used unchecked: a weight list shorter
+  than the k-point list was truncated by `zip`, and weights not
+  summing to 1 rescaled every result. `dos`, `fermi_level`,
+  `band_edges`, `sigma_optical`, `sigma_tensor`, `drude_weight` and
+  `carrier_count` now refuse wrong-length, negative, non-finite or
+  unnormalized (|sum - 1| > 1e-6, loose enough for single-precision
+  weights) weights. `band_edges` ignores weights, so it does not
+  check them.
+
+### Behaviour changes
+
+- `sancho_rubio(0.5, *chain_lead_blocks(t=-1.0), eta=0.0)`: before
+  0.9236 + 0i (exact: 0.25 - 0.9682i), and
+  `transmission([0.5], ..., eta=0.0)` gave 0.0 inside the band; now
+  RuntimeError.
+- Chain lead at the band centre E = 0: with `eta = 1e-8` the surface
+  Green function was -6.7e7 i, now -0.999999995 i (closed form at the
+  same complex energy: -(1 - eta/2) i); with the default `eta = 1e-6`
+  it was -0.99996589 i, now -0.99999950 i. The impurity chain of
+  README example 4 (eps = 0.8): T(0) at `eta = 1e-8` was 1.4e-15 and
+  T(8.9e-16) was 0.9745, both now 0.86206894 (eta -> 0 limit
+  0.86206897); at `eta = 1e-6` T(0) was 0.86207437, now 0.86206638.
+  Where the decimation passes the Dyson check (every other energy in
+  the test suite) results are unchanged.
+- Two-level atom with a level at `mu`, `T = 0` (the test model):
+  `carrier_count` before NaN, now 1.0; `sigma_optical` at 1.0 eV
+  before NaN, now 49.13 (equal to the `T = 1 K` value to 1e-12).
+  At `T = 0` with no level exactly at `mu`, occupations change from
+  1/(1 + e^60) (about 9e-27) to exactly 0 or 1; nothing else changes
+  at `T > 0` (the same formula is used).
+- `dos(linear_chain(), [2.0], kpts=k, weights=w[:3])` with the
+  10-point grid: before 0.0 (correct value 0.798), now ValueError;
+  with `weights=2*w`: before 1.596, now ValueError.
+
+### Tests
+
+- New `tests/test_landauer.py` (6 tests), `tests/test_wannier_tb.py`
+  (3 tests) and `tests/test_regressions_0110.py` (9 tests; each fix is
+  pinned by a check that fails on 0.10.1). 171 tests in total (153
+  before).
+
 ## v0.10.1 - 2026-09-22
 
 Bug fixes, a rewritten README, and CI coverage of every supported
