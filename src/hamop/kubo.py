@@ -26,11 +26,10 @@ from __future__ import annotations
 import numpy as np
 
 from .eigsolve import gen_eigh
+from .model import KB, check_kgrid, fermi_dirac
 
 __all__ = ["sigma_optical", "sigma_tensor", "carrier_count",
            "drude_weight"]
-
-KB = 8.617333262e-5  # eV / K
 
 
 def _check_T(T, strict=False):
@@ -82,8 +81,8 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
     if mesh is not None or kpts is not None:
         if mesh is not None:
             kpts, weights = model.monkhorst_pack(mesh)
-        elif weights is None:
-            weights = np.full(len(kpts), 1.0 / len(kpts))
+        else:
+            kpts, weights = check_kgrid(kpts, weights)
         area = model.cell_volume
     else:
         if model.cell is not None:
@@ -95,8 +94,7 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
         H, S = model.bloch(k)
         dH, dS = model.bloch_derivative(k, direction)
         e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
-        x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
-        f = 1.0 / (1.0 + np.exp(x))
+        f = fermi_dirac(e, mu, T)
         M = c.conj().T @ dH @ c
         Sd = c.conj().T @ dS @ c
         M = M - 0.5 * (e[:, None] + e[None, :]) * Sd
@@ -154,8 +152,8 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
     if mesh is not None or kpts is not None:
         if mesh is not None:
             kpts, weights = model.monkhorst_pack(mesh)
-        elif weights is None:
-            weights = np.full(len(kpts), 1.0 / len(kpts))
+        else:
+            kpts, weights = check_kgrid(kpts, weights)
         area = model.cell_volume
     else:
         if model.cell is not None:
@@ -180,8 +178,7 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
             Xb = _dipole_term(model, c, e, b)
             if Xb is not None:
                 Mb = Mb + Xb
-        x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
-        f = 1.0 / (1.0 + np.exp(x))
+        f = fermi_dirac(e, mu, T)
         dE = e[None, :] - e[:, None]          # E_m - E_n
         df = f[:, None] - f[None, :]          # f_n - f_m
         num = df * Ma * Mb.T                  # (f_n - f_m) M^a_nm M^b_mn
@@ -205,14 +202,13 @@ def carrier_count(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
         if model.cell is not None:
             raise ValueError("periodic model: give mesh or kpts")
         kpts, weights = [None], [1.0]
-    elif weights is None:
-        weights = np.full(len(kpts), 1.0 / len(kpts))
+    else:
+        kpts, weights = check_kgrid(kpts, weights)
     n = 0.0
     for k, w in zip(kpts, weights):
         H, S = model.bloch(k)
         e = gen_eigh(H, S, thresh=thresh)
-        x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
-        n += w * spin * float((1.0 / (1.0 + np.exp(x))).sum())
+        n += w * spin * float(fermi_dirac(e, mu, T).sum())
     return n
 
 
@@ -240,8 +236,7 @@ def drude_weight(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
         kpts, weights = model.monkhorst_pack(mesh)
         area = model.cell_volume
     elif kpts is not None:
-        if weights is None:
-            weights = np.full(len(kpts), 1.0 / len(kpts))
+        kpts, weights = check_kgrid(kpts, weights)
         area = model.cell_volume
     else:
         if model.cell is not None:

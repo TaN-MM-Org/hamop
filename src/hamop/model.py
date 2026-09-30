@@ -27,6 +27,50 @@ import numpy as np
 
 __all__ = ["TightBindingModel"]
 
+KB = 8.617333262e-5  # Boltzmann constant, eV / K (CODATA 2018)
+
+
+def fermi_dirac(e, mu, T):
+    """Fermi-Dirac occupation at temperature T (kelvin), shared by every
+    module that fills states.  T = 0 is the exact step, with 1/2 for a
+    level exactly at mu (the T -> 0+ limit of f(mu) = 1/2), so a level
+    sitting at mu no longer turns into 0/0 = NaN."""
+    e = np.asarray(e, dtype=float)
+    if T < 0:
+        raise ValueError("T must be >= 0 K")
+    if T == 0:
+        return (e < mu).astype(float) + 0.5 * (e == mu)
+    x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
+    return 1.0 / (1.0 + np.exp(x))
+
+
+def check_kgrid(kpts, weights, wtol=1e-6):
+    """Validate an explicit k-point list and its weights.
+
+    Returns (kpts, weights) with uniform weights when none are given.
+    Refuses a weight list whose length differs from the k-point list
+    (a plain ``zip`` would silently drop the extra entries), negative
+    or non-finite weights, and weights that do not sum to one (within
+    the relative tolerance ``wtol`` = 1e-6, loose enough for weights
+    stored in single precision), which would silently rescale every
+    Brillouin-zone average."""
+    n = len(kpts)
+    if n == 0:
+        raise ValueError("empty k-point list")
+    if weights is None:
+        return kpts, np.full(n, 1.0 / n)
+    w = np.asarray(weights, dtype=float).ravel()
+    if w.shape != (n,):
+        raise ValueError(f"{w.size} weights for {n} k-points; give one "
+                         "weight per k-point")
+    if not np.all(np.isfinite(w)) or np.any(w < 0.0):
+        raise ValueError("k-point weights must be finite and >= 0")
+    if abs(float(w.sum()) - 1.0) > wtol:
+        raise ValueError(f"k-point weights sum to {w.sum():.12g}, not 1; "
+                         "Brillouin-zone averages need normalized "
+                         "weights (divide by their sum)")
+    return kpts, w
+
 
 class TightBindingModel:
     """Sites, orbitals and directed hopping blocks; assembles H(k), S(k).

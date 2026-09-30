@@ -61,32 +61,126 @@ def _sigma_at(sigma_int, i, E, n):
 
 
 def sancho_rubio(E, H00, H01, S00=None, S01=None, eta=1e-6, maxiter=400,
-                 tol=1e-12):
+                 tol=1e-12, check_tol=1e-10):
     """Retarded surface Green function of a semi-infinite periodic lead.
 
     H00: principal-layer block; H01: coupling from one layer to the
     next deeper layer.  S blocks default to identity / zero
     (orthogonal basis).
+
+    The result is checked, not trusted (since 0.11.0).  The surface
+    Green function g must satisfy its own Dyson equation
+
+        g = (A - a g b)^-1,   A = z S00 - H00,  a = z S01 - H01,
+                              b = z S01^dag - H01^dag,
+
+    and, being retarded, i (g - g^dag) must have no negative
+    eigenvalues.  The decimation (Lopez Sancho et al.) is tried first.
+    It can fail in two ways: at eta = 0 inside a band it never
+    converges, and when E coincides with an eigenvalue of H00 (e.g.
+    E = 0 for a chain with on-site energy 0) its first steps divide by
+    a number of size eta, so with a small eta it loses up to
+    log10(1/eta) digits and can reach a wrong, self-inconsistent fixed
+    point (for the chain at E = 0, eta = 1e-8 it gives -6.7e7 i
+    instead of -i).  If the decimation fails the Dyson check
+    (relative residual above ``check_tol``) and eta > 0, the surface
+    Green function is computed a second, independent way from the
+    lead's decaying modes: the solutions psi_{n+1} = lambda psi_n of
+    b + A lambda + a lambda^2 = 0 with |lambda| < 1, giving
+    g = (A + a F)^-1 with F = U diag(lambda) U^-1 (the mode-matching
+    form of D. H. Lee and J. D. Joannopoulos, Phys. Rev. B 23, 4988 and
+    4997 (1981)).
+    That result must pass the same checks.  If neither route passes,
+    RuntimeError is raised instead of returning a wrong number; this
+    always happens at eta = 0 inside a band.
     """
     n = len(H00)
-    S00 = np.eye(n, dtype=complex) if S00 is None else S00
-    S01 = np.zeros_like(H01) if S01 is None else S01
+    S00 = np.eye(n, dtype=complex) if S00 is None else np.asarray(S00)
+    S01 = np.zeros_like(H01) if S01 is None else np.asarray(S01)
     z = E + 1j * eta
-    a = z * S01 - H01
-    b = _back(z, H01, S01)
-    es = e = z * S00 - H00
+    A = z * S00 - H00
+    a0 = z * S01 - H01
+    b0 = _back(z, H01, S01)
     I = np.eye(n, dtype=complex)
-    for _ in range(maxiter):
-        g = np.linalg.solve(e, I)
-        ab = a @ g @ b
-        ba = b @ g @ a
-        es = es - ab
-        e = e - ab - ba
-        a = a @ g @ a
-        b = b @ g @ b
-        if np.abs(a).max() + np.abs(b).max() < tol:
-            break
-    return np.linalg.solve(es, I)
+
+    def dyson_residual(g):
+        R = (A - a0 @ g @ b0) @ g - I
+        return float(np.abs(R).max())
+
+    def retarded(g):
+        spec = 1j * (g - g.conj().T)
+        w = np.linalg.eigvalsh(0.5 * (spec + spec.conj().T))
+        return bool(w.min() >= -check_tol * max(1.0, float(np.abs(g).max())))
+
+    # route 1: decimation
+    a, b = a0, b0
+    es = e = A
+    converged = False
+    with np.errstate(all="ignore"):
+        for _ in range(int(maxiter)):
+            g = np.linalg.solve(e, I)
+            ab = a @ g @ b
+            ba = b @ g @ a
+            es = es - ab
+            e = e - ab - ba
+            a = a @ g @ a
+            b = b @ g @ b
+            if np.abs(a).max() + np.abs(b).max() < tol:
+                converged = True
+                break
+        g_dec = np.linalg.solve(es, I) if converged else None
+    res_dec = np.inf
+    if converged and np.all(np.isfinite(g_dec)):
+        res_dec = dyson_residual(g_dec)
+        if res_dec <= check_tol and retarded(g_dec):
+            return g_dec
+    # route 2: decaying modes (needs eta > 0 to tell retarded from advanced)
+    res_mod = np.inf
+    if eta > 0:
+        g_mod = _surface_from_modes(A, a0, b0)
+        if g_mod is not None:
+            res_mod = dyson_residual(g_mod)
+            if res_mod <= check_tol and retarded(g_mod):
+                return g_mod
+    why = ("the decimation did not converge" if not converged else
+           f"the decimation's Dyson residual is {res_dec:.2e}")
+    if eta > 0:
+        why += f"; the mode route's residual is {res_mod:.2e}"
+    raise RuntimeError(
+        f"lead surface Green function failed at E = {E}, eta = {eta} "
+        f"({why}; check_tol = {check_tol:g}).  Inside a lead band the "
+        "calculation needs eta > 0; a wrong surface Green function is "
+        "never returned")
+
+
+def _surface_from_modes(A, a, b):
+    """Surface Green function (A + a F)^-1 from the n decaying modes of
+    b + A lam + a lam^2 = 0 (generalized companion eigenproblem, so a
+    singular coupling a gives infinite eigenvalues that are discarded
+    and a singular b gives lam = 0 modes that are kept).  None when the
+    modes do not split cleanly into n with |lam| < 1 and n with
+    |lam| > 1, or when their eigenvectors are singular."""
+    from scipy.linalg import eig
+    n = A.shape[0]
+    I = np.eye(n, dtype=complex)
+    Z = np.zeros((n, n), dtype=complex)
+    M1 = np.block([[Z, I], [-b, -A]])
+    M2 = np.block([[I, Z], [Z, a]])
+    with np.errstate(all="ignore"):
+        lam, V = eig(M1, M2)
+    mag = np.where(np.isfinite(lam), np.abs(lam), np.inf)
+    order = np.argsort(mag)
+    if not (mag[order[n - 1]] < 1.0 < mag[order[n]]):
+        return None
+    idx = order[:n]
+    U = V[:n, idx]
+    if np.linalg.cond(U) > 1e12:
+        return None
+    F = (U * lam[idx]) @ np.linalg.inv(U)
+    try:
+        return np.linalg.solve(A + a @ F, I)
+    except np.linalg.LinAlgError:
+        return None
 
 
 def _lead_sigmas(E, lead_H00, lead_H01, lead_S00, lead_S01, eta):

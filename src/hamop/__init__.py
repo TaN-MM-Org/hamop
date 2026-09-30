@@ -17,6 +17,8 @@ from .nonlinear import band_curvatures, berry_dipole, fermi_occupation
 from .device import principal_layers
 from .eigsolve import gen_eigh
 from .kubo import carrier_count, drude_weight, sigma_optical, sigma_tensor
+from .landauer import (landauer_conductance, landauer_current,
+                       thermoelectric)
 from .lattices import (chain_lead_blocks, graphene, haldane,
                        linear_chain, ssh, two_site)
 from .interpolate import FourierInterpolator, fourier_interpolation
@@ -32,13 +34,14 @@ from .sparse import (bloch_derivative_sparse, bloch_sparse, kpm_dos,
 from .spectrum import band_edges, bands, dos, fermi_level, k_path
 from .spin import PAULI, kane_mele, with_spin
 from .symmetry import find_point_group, symmetry_fold
-from .wannier import from_wannier90, load_wannier90_hr, save_wannier90_hr
+from .wannier import (from_wannier90, from_wannier90_tb, load_wannier90_hr,
+                      load_wannier90_tb, save_wannier90_hr)
 from .lab import (BandFit, band_information, design_kpoints,
                   fit_bands)
 from .geometry import (quantum_geometric_tensor, quantum_metric,
                        quantum_weight)
 
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
@@ -49,6 +52,7 @@ __all__ = [
     "device_greens", "device_ldos", "bond_currents",
     "transmission_sparse", "buttiker_transmission", "scba_transmission",
     "multiprobe_transmission", "principal_layers",
+    "landauer_conductance", "landauer_current", "thermoelectric",
     "bloch_sparse", "bloch_derivative_sparse", "lowest_bands",
     "kpm_dos", "kpm_sigma",
     "PAULI", "with_spin", "kane_mele",
@@ -58,6 +62,7 @@ __all__ = [
     "linear_chain", "two_site", "graphene", "ssh", "haldane",
     "chain_lead_blocks",
     "from_wannier90", "load_wannier90_hr", "save_wannier90_hr",
+    "from_wannier90_tb", "load_wannier90_tb",
     "BandFit", "fit_bands", "band_information", "design_kpoints",
     "quantum_geometric_tensor", "quantum_metric", "quantum_weight",
 ]

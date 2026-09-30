@@ -10,10 +10,9 @@ from __future__ import annotations
 import numpy as np
 
 from .eigsolve import gen_eigh
+from .model import KB, check_kgrid, fermi_dirac
 
 __all__ = ["bands", "dos", "fermi_level", "band_edges", "k_path"]
-
-KB = 8.617333262e-5  # Boltzmann constant, eV / K (CODATA 2018)
 
 
 def _eigs(model, kpts, thresh):
@@ -60,8 +59,7 @@ def fermi_level(model, filling, mesh=None, kpts=None, weights=None,
     eigs = _eigs(model, kpts, thresh)
 
     def count(mu):
-        x = np.clip((eigs - mu) / (KB * T), -60.0, 60.0)
-        f = 1.0 / (1.0 + np.exp(x))
+        f = fermi_dirac(eigs, mu, T)
         return float((f * np.asarray(weights)[:, None]).sum())
 
     lo, hi = eigs.min() - 5.0, eigs.max() + 5.0
@@ -80,7 +78,8 @@ def fermi_level(model, filling, mesh=None, kpts=None, weights=None,
 
 def band_edges(model, mu, mesh=None, kpts=None, weights=None, thresh=1e-10):
     """(valence-band maximum, conduction-band minimum, gap) about mu."""
-    kpts, weights = _grid(model, mesh, kpts, weights)
+    # weights play no role in the band edges, so they are not checked
+    kpts, _ = _grid(model, mesh, kpts, None)
     eigs = _eigs(model, kpts, thresh)
     below = eigs[eigs <= mu]
     above = eigs[eigs > mu]
@@ -97,9 +96,7 @@ def _grid(model, mesh, kpts, weights):
         if model.cell is not None:
             raise ValueError("periodic model: give mesh or kpts")
         return [None], [1.0]
-    if weights is None:
-        weights = np.full(len(kpts), 1.0 / len(kpts))
-    return kpts, weights
+    return check_kgrid(kpts, weights)
 
 
 def k_path(vertices, n_per_segment=30):

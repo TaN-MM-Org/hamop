@@ -37,6 +37,8 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import eigsh
 
+from .model import fermi_dirac
+
 __all__ = ["bloch_sparse", "bloch_derivative_sparse", "lowest_bands",
            "kpm_dos", "kpm_sigma"]
 
@@ -340,7 +342,6 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
         raise ValueError("omega must be positive photon energies")
     if T < 0:
         raise ValueError("T must be >= 0 K")
-    KB = 8.617333262e-5  # eV / K (CODATA 2018)
     H, _ = bloch_sparse(model, None)
     v = _velocity_sparse(model, direction)
     n = model.nao
@@ -375,9 +376,7 @@ def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
         Pp = np.cos(m * thp[None, :]) \
             / (np.pi * np.sqrt(1.0 - xp ** 2) * a)
         rho = np.sum(P * (mu_t @ Pp), axis=0)
-        xE = np.clip((Eo - mu) / (KB * T), -60.0, 60.0)
-        xEp = np.clip((Eo + hw - mu) / (KB * T), -60.0, 60.0)
-        df = 1.0 / (1.0 + np.exp(xE)) - 1.0 / (1.0 + np.exp(xEp))
+        df = fermi_dirac(Eo, mu, T) - fermi_dirac(Eo + hw, mu, T)
         integ = getattr(np, "trapezoid", getattr(np, "trapz", None))
         sig[iw] = 4.0 * np.pi * spin * integ(df * rho, Eo) / hw
     return sig
