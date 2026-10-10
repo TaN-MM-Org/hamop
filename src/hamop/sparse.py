@@ -14,7 +14,8 @@ H. Fehske, Rev. Mod. Phys. 78, 275 (2006) -- with either an exact
 
 ``kpm_sigma`` extends the same machinery to the Kubo-Greenwood optical
 conductivity through the double Chebyshev expansion of the
-velocity-velocity spectral density (same reference, Sec. V), and
+velocity-velocity spectral density (same reference, Secs. II.E and
+III.D), and
 ``bloch_derivative_sparse`` supplies the sparse velocity assembly --
 with intra-atomic dipole blocks entering as the exact sparse operator
 i(HX - XH).  Sparse topology lives in the berry module
@@ -333,7 +334,8 @@ def kpm_sigma(model: TightBindingModel, omega: ArrayLike, mu: float,
     The velocity-velocity spectral density
     rho_v(E, E') = Tr[ v delta(E - H) v delta(E' - H) ] is expanded in
     a double Chebyshev series with Jackson damping (Weisse et al.,
-    Rev. Mod. Phys. 78, 275 (2006), Sec. V) and the conductivity is
+    Rev. Mod. Phys. 78, 275 (2006), Secs. II.E and III.D) and the
+    conductivity is
 
         Re sigma(omega) = (4 pi spin) * Integral dE
                           [f(E) - f(E + omega)] rho_v(E, E + omega)
