@@ -19,7 +19,11 @@ computes:
   wires (the **transmission**), and from it the conductance, current
   and thermovoltage a measurement at a given temperature would report;
 - topological numbers such as the **Chern number**, and related
-  geometric quantities of the electron states.
+  geometric quantities of the electron states;
+- for your own measurements: model parameters fitted to measured band
+  energies with error bars, error bars for anything computed from
+  them, and the transmittance of a 2D sample that an optical
+  measurement would see.
 
 The point of the package is that all of these come from the *same*
 matrices. When the optics and the energy levels of one model are
@@ -48,6 +52,7 @@ material come from your own calculation or measurement.
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
 - [How the results are checked](#how-the-results-are-checked)
+- [What changed in 0.12.0](#what-changed-in-0120)
 - [What changed in 0.11.0](#what-changed-in-0110)
 - [Bugs fixed in 0.10.1](#bugs-fixed-in-0101)
 - [Limits](#limits)
@@ -174,7 +179,7 @@ Units and conventions, stated once:
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with hamop 0.11.0. The model parameters are illustrative
+printed with hamop 0.12.0. The model parameters are illustrative
 values, not fitted to any material, unless the text says otherwise.
 
 ### 1. Graphene: bands and the absorption plateau
@@ -551,6 +556,104 @@ the diagonal elements `<m0|r|m0>`; the off-diagonal ones are read by
 `load_wannier90_tb` but not used (see Limits). Directions in which no
 hopping occurs are dropped, so this chain imports as a 1D model.
 
+### 11. Error bars for what you did not measure, and a check of the model
+
+```python
+import numpy as np
+from hamop import linear_chain, bands, fit_bands, propagate_uncertainty
+
+def build(theta):                      # theta = (t, e0), both in eV
+    return linear_chain(t=theta[0], e0=theta[1])
+
+k = np.linspace(0.1, 3.0, 12)[:, None] # the measurement of example 6
+sigma = 0.03
+rng = np.random.default_rng(13)
+measured = 0.2 + 2 * (-1.0) * np.cos(k[:, 0]) + sigma * rng.standard_normal(12)
+fit = fit_bands(build, [-1.3, 0.5], k, measured, sigmas=sigma)
+print(f"p-value: {fit.p_value:.3f}")
+
+# Error bars of quantities that were not measured directly.
+width = propagate_uncertainty(fit, lambda th: 4 * abs(th[0]))
+top = propagate_uncertainty(fit, lambda th: bands(build(th), [[np.pi]])[0, 0])
+print(f"band width 4|t|: {width['value']:.4f} +/- {width['sigma']:.4f} eV")
+print(f"band top at k = pi: {top['value']:.4f} +/- {top['sigma']:.4f} eV")
+
+# The same chain with a second-neighbor hopping of 0.1 eV that the
+# fitted model does not have: the p-value flags the missing physics.
+wrong = measured + 2 * 0.1 * np.cos(2 * k[:, 0])
+bad = fit_bands(build, [-1.3, 0.5], k, wrong, sigmas=sigma)
+print(f"chi-squared {bad.chi2:.1f} for {bad.chi2_dof} degrees of freedom, "
+      f"p-value {bad.p_value:.1e}")
+```
+
+```
+p-value: 0.042
+band width 4|t|: 4.0010 +/- 0.0244 eV
+band top at k = pi: 2.2092 +/- 0.0151 eV
+chi-squared 246.3 for 10 degrees of freedom, p-value 3.2e-47
+```
+
+`propagate_uncertainty` turns the fit's covariance into the error bar
+of any number you compute from the parameters: here the band width and
+the band energy at `k = pi`, a point the measurement did not reach.
+By default it propagates to first order, and it first checks that the
+quantity is close to linear over one standard deviation of the
+parameters. If it is not (for example at a band crossing, or where the
+quantity has a minimum), the call is refused and `method="monte_carlo"`
+samples the parameters instead.
+
+`fit.p_value` is the chance of a chi-squared at least this large if the
+model is right and the stated errors are correct. The first fit gives
+0.042: these data were generated from the model, and a value this low
+happens by chance in about 4 % of such experiments. The second data set
+contains physics the model lacks, and its p-value of 3e-47 says so
+clearly. A small p-value means either the errors are underestimated or
+the model is incomplete; the fit alone cannot tell which.
+
+### 12. A 2D sample in an optical measurement
+
+```python
+import numpy as np
+from hamop import (graphene, sigma_optical, sheet_optics,
+                   sheet_conductivity_from_transmittance)
+
+g = graphene(t=-2.7, a=2.46)
+omega = np.array([1.0, 1.3])                # photon energies, eV
+sigma = sigma_optical(g, omega, mu=0.0, mesh=120, eta=0.12, T=10.0)
+
+free = sheet_optics(sigma)                  # free-standing sheet in air
+on_glass = sheet_optics(sigma, n_in=1.0, n_out=1.5)   # on a substrate, index 1.5
+for w, T, A, T_rel in zip(omega, free["T"], free["A"], on_glass["T_rel"]):
+    print(f"photon {w:.1f} eV: free-standing T = {T:.4f}, A = {A:.4f}; "
+          f"on the substrate T/T_bare = {T_rel:.4f}")
+
+# The other way round: a measured T/T_bare of 0.9805 +/- 0.0010 on the
+# same substrate gives the sheet conductivity in the package's unit.
+m = sheet_conductivity_from_transmittance(0.9805, n_in=1.0, n_out=1.5,
+                                          T_rel_err=0.0010)
+print(f"measured Re sigma = {m['sigma']:.3f} +/- {m['sigma_err']:.3f} "
+      "x e^2/(4 hbar)")
+```
+
+```
+photon 1.0 eV: free-standing T = 0.9770, A = 0.0229; on the substrate T/T_bare = 0.9815
+photon 1.3 eV: free-standing T = 0.9768, A = 0.0231; on the substrate T/T_bare = 0.9813
+measured Re sigma = 1.079 +/- 0.056 x e^2/(4 hbar)
+```
+
+An optical experiment on a 2D material reports the transmittance `T`
+(the fraction of light that passes), often as the ratio to the bare
+substrate, `T/T_bare`. `sheet_optics` computes it, together with the
+reflectance `R` and the absorptance `A`, from the sheet conductivity of
+a 2D model at normal incidence. The free-standing graphene model
+absorbs about 2.3 %, the value `pi alpha` measured by Nair et al.,
+Science 320, 1308 (2008) (`alpha` is the fine-structure constant).
+`sheet_conductivity_from_transmittance` goes the other way, from a
+measured `T/T_bare` and its error to `Re sigma` with an error bar, so a
+measured spectrum can be compared with `sigma_optical` point by point.
+The substrate index 1.5 and the measured value 0.9805 are illustrative
+numbers, not data for a real sample.
+
 ## What is in the package
 
 Each function's docstring (`help(hamop.sigma_optical)`, for example)
@@ -689,6 +792,20 @@ gives its inputs, units and conventions.
   adds, one at a time, the k-point that most shrinks the joint
   uncertainty of the parameters (Pukelsheim, Optimal Design of
   Experiments, SIAM (2006)).
+- `propagate_uncertainty` and `BandFit.p_value` (example 11): the error
+  bar of any quantity computed from fitted parameters, by first-order
+  propagation through the fit covariance (refused when the quantity is
+  not close to linear over one standard deviation) or by Monte Carlo
+  sampling; and the chi-squared p-value of a fit, which says whether
+  the data are consistent with the model and the stated errors.
+
+**Comparing with optical measurements**
+
+- `sheet_optics`, `sheet_conductivity_from_transmittance` (example 12):
+  the transmittance, reflectance and absorptance of a 2D sheet at
+  normal incidence between two transparent media, from the sheet
+  conductivity of a 2D model, and the inverse, `Re sigma` with an error
+  bar from a measured transmittance relative to the bare substrate.
 
 ## When it refuses, and why
 
@@ -743,8 +860,21 @@ doubtful number, when:
   transmitted in the Fermi window;
 - a planned or measured set of band energies cannot tell the fit
   parameters apart, or there are fewer measurements than parameters;
+- `propagate_uncertainty` (linear method) is given a quantity that is
+  not close to linear over one standard deviation of the parameters;
+- `sheet_optics` gets a negative `Re sigma` (gain) or a refractive index
+  that is not real and positive; `sheet_conductivity_from_transmittance`
+  gets a transmittance ratio above what a passive sheet allows (by more
+  than three times its stated error, or at all when no error is given);
+- `monkhorst_pack(time_reversal=True)` is asked of a model with complex
+  dipole blocks (`set_dipole`), where the optics at `k` and `-k` differ;
+- a site index is negative or out of range, or a lattice image has the
+  wrong number of components;
 - a block has the wrong shape, an on-site or dipole block is not
   Hermitian, or a finite model is given a non-zero lattice image;
+- a broadening `eta` is not positive (`dos`, `sigma_optical`; negative
+  in `sigma_tensor`), a dephasing `gamma` or disorder strength `W2` is
+  negative, or `n_occ` exceeds the number of bands;
 - photon energies given to `sigma_optical` or `kpm_sigma` are zero or
   negative (`sigma_tensor` accepts `omega = 0`, the static Hall
   conductivity of example 3), or the lineshape is unknown;
@@ -755,7 +885,7 @@ doubtful number, when:
 
 ## How the results are checked
 
-171 automated tests run on every change, on Python 3.9, 3.10, 3.11,
+190 automated tests run on every change, on Python 3.9, 3.10, 3.11,
 3.12, 3.13 and 3.14, and once more on Python 3.10 with the oldest
 NumPy (1.22.0) and SciPy (1.8.0) the package allows. The numerical
 tests compare the package with a closed-form result, a symmetry, or a
@@ -911,6 +1041,68 @@ tolerances the tests use:
   relative; 300 seeded simulated experiments match the reported error
   bars within 15 %; a design that cannot separate the parameters is
   refused.
+- Propagated error bars of band energies (linear in the parameters)
+  match the closed form `g^T C g` to 1e-6 relative; across 200 seeded
+  simulated experiments the scatter of the fitted band width matches
+  its propagated error bar within 15 %, and the p-values of these
+  correct-model fits fall below 0.1 in 4 % to 16 % of cases (10 %
+  expected). The p-value equals the closed-form chi-squared tail for
+  2 and 10 degrees of freedom to 1e-12. The Monte Carlo method agrees
+  with the linear one within 5 %; for a quantity with zero slope the
+  linear method is refused and the Monte Carlo mean and spread match
+  the chi-squared closed form within 6 % and 10 %.
+- The sheet formulas match an independent thin-film (Airy) calculation
+  of a film of vanishing thickness carrying the same sheet conductance
+  to 1e-6, for five combinations of conductivity and refractive
+  indices, with `T + R + A = 1` to 1e-14. The fine-structure constant
+  agrees with SciPy's CODATA value to 1e-8; free-standing graphene
+  absorbs 2.3 %, as reported by Nair et al. (2008); the inverse
+  recovers the film's conductivity to 1e-5, and its error bar matches
+  20000 seeded noisy measurements within 3 %.
+
+## What changed in 0.12.0
+
+**New**
+
+- `propagate_uncertainty` gives the error bar of any quantity computed
+  from parameters fitted with `fit_bands`, and `BandFit.p_value` says
+  whether the measured energies are consistent with the model
+  (example 11).
+- `sheet_optics` and `sheet_conductivity_from_transmittance` connect
+  the sheet conductivity of a 2D model with an optical transmittance
+  measurement, in both directions (example 12). They use the
+  fine-structure constant (CODATA 2018).
+
+**Silent wrong answers that are now errors or fixed**
+
+- `monkhorst_pack(time_reversal=True)` checked only the hopping and
+  overlap blocks. With a complex dipole block (`set_dipole`) the bands
+  stay even in `k` but the optical matrix elements do not, so the
+  folded grid gave a wrong optical conductivity: 1.949 instead of
+  2.096 at 1 eV (7 % low; 12 % at 2 eV) for the test model. Such a
+  model is now refused, with a pointer to `symmetry_fold` for
+  eigenvalue-only quantities.
+- A negative site index, as in `add_hop(0, -1, ...)`, passed the shape
+  check but was placed outside the matrix, so the hopping vanished
+  without an error: a two-site molecule had levels (0, 0) instead of
+  (-1, +1). `set_dipole` had the same problem. Negative and
+  out-of-range site indices are now refused.
+- `save_wannier90_hr` with an empty comment, or one containing a line
+  break, wrote a file that `load_wannier90_hr` could not read back. The
+  header is now always one non-blank line.
+
+**Clearer errors**
+
+- Inputs that used to fail later with an unrelated message, or to give
+  a meaningless number, are refused up front: a lattice image with the
+  wrong number of components, `norb < 1`, positions and lattice
+  vectors of different dimension, a `mesh` of the wrong length, a
+  broadening `eta` that is not positive, a negative dephasing `gamma`
+  or disorder `W2`, an SCBA `mixing` outside (0, 1], a Landauer
+  `window` that is not positive, `n_occ` larger than the number of
+  bands, and an R-vector with more than three components.
+- `sigma_optical` accepts a single photon energy.
+- Public functions now carry type hints.
 
 ## What changed in 0.11.0
 
@@ -1024,8 +1216,22 @@ These are deliberate choices, not oversights:
   error only up to the conditioning of that equation, which grows as
   `eta` shrinks; at `eta = 1e-8` the tests find errors below 1e-8,
   smaller than the shift the broadening itself causes.
-- The package ships no material constants. The only physical constant
-  in the code is the Boltzmann constant (CODATA 2018).
+- `propagate_uncertainty` and `BandFit.p_value` assume, like the fit's
+  covariance, independent Gaussian measurement errors. The p-value
+  tests the model and the stated errors together; it cannot say which
+  of the two is wrong.
+- `sheet_optics` treats normal incidence on a sheet much thinner than
+  the wavelength, between transparent media. The back face of a
+  substrate and multiple reflections inside it are not included (they
+  largely cancel in `T/T_bare`). The sheet conductivity unit
+  `e^2/(4 hbar)` is a sheet conductance only for a model periodic in
+  two directions. A transmittance alone cannot separate `Re sigma`
+  from `Im sigma`; the inverse assumes the `Im sigma` you give (0 by
+  default), which enters only at second order.
+- The package ships no material constants. The only physical constants
+  in the code are the Boltzmann constant and the fine-structure
+  constant, both CODATA 2018 values (Tiesinga, Mohr, Newell and Taylor,
+  Rev. Mod. Phys. 93, 025010 (2021)).
 
 ## Relation to existing tools
 

@@ -5,6 +5,108 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## 0.12.0 (2026-10-10)
+
+Two tools for a lab's own measurements, three bugs fixed, and input
+checks and type hints across the public functions. No public function
+was removed or renamed, and results of valid calls are unchanged.
+
+### Added
+
+- `propagate_uncertainty(fit, quantity, method="linear")` (module
+  `hamop.lab`): the error bar and covariance of any quantity computed
+  from the parameters of a `BandFit` (a band energy at an unmeasured k,
+  a band width, a gap). "linear" is first-order propagation through
+  `fit.cov` along its principal axes; it is refused when the quantity
+  deviates from its linear prediction one standard deviation out by
+  more than `nonlinearity_tol` (default 0.1) times the propagated
+  error bar. "monte_carlo" samples N(theta, cov) with a seeded
+  generator and also reports the 15.87/84.13 percentiles. Tests: the
+  closed form g^T C g for band energies of the chain (1e-6 relative),
+  200 seeded simulated experiments (band-width scatter within 15 % of
+  the propagated error bar), Monte Carlo against linear (5 %), and the
+  chi-squared closed form for a zero-slope quantity.
+- `BandFit.p_value` (a property; the dataclass fields are unchanged):
+  the chi-squared tail probability of the fit, None without
+  measurement errors. Tested against the closed-form tail for 2 and 10
+  degrees of freedom (1e-12) and for uniformity over simulated
+  correct-model fits.
+- `sheet_optics(sigma, n_in, n_out)` and
+  `sheet_conductivity_from_transmittance(T_rel, n_in, n_out,
+  T_rel_err, sigma_imag)`: normal-incidence transmittance, reflectance
+  and absorptance of a 2D sheet between two transparent media, from
+  the sheet conductivity in units of e^2/(4 hbar), and the inverse with
+  an error bar. They use Z0 e^2/(4 hbar) = pi alpha exactly. Tests: an
+  independent thin-film (Airy) calculation in the limit of zero
+  thickness (1e-6), T + R + A = 1, the absorption of about pi alpha =
+  2.3 % of free-standing graphene reported by R. R. Nair et al.,
+  Science 320, 1308 (2008), and a seeded Monte Carlo of the inverse's
+  error bar (3 %).
+- `hamop.model.ALPHA`, the fine-structure constant 7.2973525693e-3
+  (CODATA 2018: E. Tiesinga, P. J. Mohr, D. B. Newell and B. N. Taylor,
+  Rev. Mod. Phys. 93, 025010 (2021)); the test suite checks it against
+  `scipy.constants.fine_structure` to 1e-8. The same reference is now
+  given for the Boltzmann constant.
+- README examples 11 and 12.
+
+### Fixed
+
+- `TightBindingModel.monkhorst_pack(time_reversal=True)` checked only
+  the H and S blocks for being real. A complex dipole block
+  (`set_dipole`) keeps the bands even in k but not the optical matrix
+  elements, so the k <-> -k fold gave a wrong optical conductivity.
+  For the test model (one site, two orbitals, dipole element 0.3i Angstrom,
+  40 k-points, mu = 0.5 eV, eta = 0.1 eV), sigma_optical at
+  1, 2, 3 eV was 1.9489, 2.6526, 1.3849 with the folded grid against
+  2.0963, 3.0159, 1.5778 on the full grid (7 %, 12 % and 12 % low).
+  Now: ValueError, pointing to `symmetry_fold(..., time_reversal=True)`
+  for eigenvalue-only quantities. Real dipole blocks fold exactly as
+  before. Test: `test_time_reversal_fold_refuses_complex_dipole_blocks`.
+- `add_hop` and `set_dipole` accepted negative site indices. The shape
+  check used `norb[-1]`, but the block was assembled at the orbital
+  offset `offsets[-1] = nao`, outside H, so it vanished without an
+  error. Two-site molecule with `add_hop(0, -1, (0,), [[-1.0]])`:
+  levels before (0, 0), correct (-1, +1); now ValueError. Out-of-range
+  indices also raise ValueError now (before: IndexError). Test:
+  `test_negative_site_indices_are_refused`.
+- `save_wannier90_hr` wrote the comment verbatim as the header. With
+  `comment=""` the file began with a blank line, and a comment with a
+  line break gave two header lines; `load_wannier90_hr` skips blank
+  lines, so it could not read either file back (before: ValueError
+  "non-integer degeneracy entry" and "lines 2 and 3 must carry
+  num_wann and nrpts"; now the round trip is exact to the written
+  precision). Line breaks are collapsed to spaces and an empty comment
+  is written as "written by hamop". Test:
+  `test_hr_dat_round_trip_with_an_empty_or_multiline_comment`.
+
+### Changed
+
+- Input checks with messages that name the problem, where the old code
+  failed later with an unrelated error or returned a meaningless
+  number: lattice images with the wrong number of components (before:
+  a matmul error at the first `bloch` call), `norb < 1`, positions and
+  lattice vectors of different Cartesian dimension, a `mesh` of the
+  wrong length, `eta <= 0` in `dos` and `sigma_optical` (before: a
+  negative or NaN DOS and conductivity) and `eta < 0` in
+  `sigma_tensor`, `gamma < 0` in `buttiker_transmission` and
+  `multiprobe_transmission`, `W2 < 0` or `mixing` outside (0, 1] in
+  `scba_transmission`, `window <= 0` in the Landauer functions,
+  `n_occ` outside [1, nao] in the Berry functions, fewer than two
+  vertices in `k_path`, and R-vectors with more than three components
+  in `save_wannier90_hr` (now checked before the file is opened).
+  Test: `test_input_checks_added_in_0120`.
+- `sigma_optical` accepts a scalar photon energy (before: TypeError)
+  and checks `lineshape` before the k-loop.
+- Type hints on the public functions and methods.
+- Docstrings corrected where they contradicted the code: `chern_marker`
+  returns one value per orbital, not per site; `lowest_bands` with
+  `sigma` returns the eigenvalues closest to sigma, the lowest ones
+  only when sigma lies at or below the bottom of the spectrum; the
+  `hamop.kubo` module docstring now mentions the dipole blocks.
+- 190 tests (171 before): new `tests/test_regressions_0120.py` (4),
+  `tests/test_sheet_optics.py` (10 including parametrized cases), and
+  5 new tests in `tests/test_lab.py`.
+
 ## v0.11.0 - 2026-09-30
 
 Finite-temperature transport, a one-file Wannier90 import, and three
