@@ -15,13 +15,18 @@ eigenproblem; the test suite asserts agreement with
 """
 from __future__ import annotations
 
+from typing import Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 from scipy.linalg import eigh
 
 __all__ = ["gen_eigh"]
 
 
-def gen_eigh(H, S, thresh=1e-10, eigvals_only=True):
+def gen_eigh(H: ArrayLike, S: ArrayLike, thresh: float = 1e-10,
+             eigvals_only: bool = True
+             ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Eigenvalues (and vectors) of H c = e S c, canonically orthogonalized.
 
     thresh: overlap eigenvalues below this are dropped.  Returned

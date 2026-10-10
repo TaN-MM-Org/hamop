@@ -52,10 +52,16 @@ the same integers as the dense path, and the tests assert that too.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional, Sequence
+
 import numpy as np
+from numpy.typing import ArrayLike
 from scipy.linalg import eigh
 
 from .eigsolve import gen_eigh
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["berry_phase", "chern_number", "berry_curvature",
            "chern_marker"]
@@ -150,6 +156,9 @@ def _occ_states_atomic(model, k, n_occ, solver="dense"):
 
 
 def _get_states(model, k, n_occ, frame, solver):
+    if not 1 <= int(n_occ) <= model.nao:
+        raise ValueError(f"n_occ must lie in [1, {model.nao}] (the number "
+                         "of bands of this model)")
     if frame == "lowdin":
         return _occ_states(model, k, n_occ, solver)
     if frame == "atomic":
@@ -174,8 +183,10 @@ def _link(model, frame, k_from, s_from, k_to, s_to):
     return d / abs(d)
 
 
-def berry_phase(model, kpts, n_occ=1, frame="lowdin", closure=None,
-                solver="dense"):
+def berry_phase(model: TightBindingModel, kpts: Sequence[ArrayLike],
+                n_occ: int = 1, frame: str = "lowdin",
+                closure: Optional[ArrayLike] = None,
+                solver: str = "dense") -> float:
     """Berry (Wilson-loop) phase of the lowest ``n_occ`` bands along a
     closed loop of k-points.
 
@@ -206,7 +217,9 @@ def berry_phase(model, kpts, n_occ=1, frame="lowdin", closure=None,
     return float(np.angle(prod))
 
 
-def berry_curvature(model, mesh, n_occ=1, frame="lowdin", solver="dense"):
+def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
+                    frame: str = "lowdin",
+                    solver: str = "dense") -> np.ndarray:
     """Lattice Berry curvature (plaquette fluxes) of the lowest
     ``n_occ`` bands on a mesh x mesh grid of the 2D Brillouin zone.
 
@@ -262,7 +275,8 @@ def berry_curvature(model, mesh, n_occ=1, frame="lowdin", solver="dense"):
     return F
 
 
-def chern_number(model, mesh=24, n_occ=1, frame="lowdin", solver="dense"):
+def chern_number(model: TightBindingModel, mesh: int = 24, n_occ: int = 1,
+                 frame: str = "lowdin", solver: str = "dense") -> float:
     """Chern number of the lowest ``n_occ`` bands (exact integer of the
     lattice field strength; float returned is integer to numerical
     rounding, which the tests pin to 1e-12).  The tests also assert
@@ -271,9 +285,12 @@ def chern_number(model, mesh=24, n_occ=1, frame="lowdin", solver="dense"):
     return float(F.sum() / (2.0 * np.pi))
 
 
-def chern_marker(model, mu, thresh=1e-10):
+def chern_marker(model: TightBindingModel, mu: float,
+                 thresh: float = 1e-10) -> np.ndarray:
     """Local (real-space) Chern marker of a *finite* 2D model: the
-    per-site array m_i = 4 pi Im [P x Q y P]_ii (Angstrom^2), following
+    per-orbital array m_i = 4 pi Im [P x Q y P]_ii (Angstrom^2; one
+    entry per orbital, in the model's orbital order, so a site's value
+    is the sum over its orbitals), following
     R. Bianco and R. Resta, Phys. Rev. B 84, 241106(R) (2011), with P
     the projector on states below mu, Q = 1 - P, and x, y the
     site-diagonal position operators.

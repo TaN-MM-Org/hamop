@@ -33,11 +33,17 @@ marker, :func:`hamop.chern_marker`.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Optional, Sequence, Tuple
+
 import numpy as np
+from numpy.typing import ArrayLike
 from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import eigsh
 
 from .model import fermi_dirac
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["bloch_sparse", "bloch_derivative_sparse", "lowest_bands",
            "kpm_dos", "kpm_sigma"]
@@ -95,7 +101,8 @@ def _vv_moments(H, va, vb, a, b, M, n, n_random, seed):
     return mu_mn
 
 
-def bloch_sparse(model, k=None):
+def bloch_sparse(model: TightBindingModel, k: Optional[ArrayLike] = None
+                 ) -> Tuple[Any, Any]:
     """H(k), S(k) as CSR sparse matrices; S is None for an orthogonal
     model (identity implied).
 
@@ -129,7 +136,9 @@ def bloch_sparse(model, k=None):
     return H, S
 
 
-def bloch_derivative_sparse(model, k=None, direction=0):
+def bloch_derivative_sparse(model: TightBindingModel,
+                            k: Optional[ArrayLike] = None,
+                            direction: int = 0) -> Tuple[Any, Any]:
     """dH/dk, dS/dk along a Cartesian direction as CSR sparse matrices
     (dS is None for an orthogonal model) -- the sparse counterpart of
     :meth:`TightBindingModel.bloch_derivative`, identical element for
@@ -162,13 +171,18 @@ def bloch_derivative_sparse(model, k=None, direction=0):
     return dH, dS
 
 
-def lowest_bands(model, kpts, n_bands, sigma=None, tol=0.0):
+def lowest_bands(model: TightBindingModel, kpts: Sequence[Any],
+                 n_bands: int, sigma: Optional[float] = None,
+                 tol: float = 0.0) -> np.ndarray:
     """The ``n_bands`` lowest eigenvalues at each k, by sparse Lanczos.
 
     kpts: list of Cartesian k-points ([None] for a finite system).
     sigma: optional shift for shift-invert mode (fastest when the
-    states of interest sit near a known energy, e.g. a band edge);
-    without it the smallest-algebraic mode is used.  Nonorthogonal
+    states of interest sit near a known energy, e.g. a band edge).
+    With sigma the result is the ``n_bands`` eigenvalues *closest to
+    sigma*, which are the lowest ones only if sigma lies below (or at
+    the bottom of) the spectrum; without it the smallest-algebraic
+    mode is used and the lowest eigenvalues are returned.  Nonorthogonal
     models solve the generalized problem H c = e S c directly.
     Returns an (nk, n_bands) array, each row sorted ascending.
 
@@ -219,8 +233,10 @@ def _jackson(M):
             + np.sin(q * m) / np.tan(q)) / (M + 1.0)
 
 
-def kpm_dos(model, energies, n_moments=200, n_random=None, seed=0,
-            bounds=None, margin=0.01):
+def kpm_dos(model: TightBindingModel, energies: ArrayLike,
+            n_moments: int = 200, n_random: Optional[int] = None,
+            seed: int = 0, bounds: Optional[Tuple[float, float]] = None,
+            margin: float = 0.01) -> np.ndarray:
     """Kernel-polynomial density of states of a large *finite* model
     (states / eV, integrating to the total orbital count).
 
@@ -304,9 +320,12 @@ def kpm_dos(model, energies, n_moments=200, n_random=None, seed=0,
     return rho
 
 
-def kpm_sigma(model, omega, mu, direction=0, n_moments=128,
-              n_random=None, seed=0, T=300.0, spin=2, bounds=None,
-              margin=0.01, n_energy=400):
+def kpm_sigma(model: TightBindingModel, omega: ArrayLike, mu: float,
+              direction: int = 0, n_moments: int = 128,
+              n_random: Optional[int] = None, seed: int = 0,
+              T: float = 300.0, spin: float = 2,
+              bounds: Optional[Tuple[float, float]] = None,
+              margin: float = 0.01, n_energy: int = 400) -> np.ndarray:
     """Kernel-polynomial Kubo-Greenwood optical conductivity of a large
     *finite* model (real part, units of e^2/(4 hbar), same convention
     as :func:`hamop.sigma_optical` with area = 1).

@@ -52,7 +52,13 @@ point is refused with the gap named.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Dict
+
 import numpy as np
+from numpy.typing import ArrayLike
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["quantum_geometric_tensor", "quantum_metric",
            "quantum_weight"]
@@ -79,8 +85,9 @@ def _projector(model, k, n_occ, gap_min):
     return vo @ vo.conj().T
 
 
-def quantum_geometric_tensor(model, k, n_occ=1, delta=1e-5,
-                             gap_min=1e-8):
+def quantum_geometric_tensor(model: TightBindingModel, k: ArrayLike,
+                             n_occ: int = 1, delta: float = 1e-5,
+                             gap_min: float = 1e-8) -> np.ndarray:
     """The occupied-subspace quantum geometric tensor at one k.
 
     Returns the (dim, dim) complex matrix Q_ab; its real part is the
@@ -107,13 +114,17 @@ def quantum_geometric_tensor(model, k, n_occ=1, delta=1e-5,
     return Q
 
 
-def quantum_metric(model, k, n_occ=1, delta=1e-5, gap_min=1e-8):
+def quantum_metric(model: TightBindingModel, k: ArrayLike, n_occ: int = 1,
+                   delta: float = 1e-5,
+                   gap_min: float = 1e-8) -> np.ndarray:
     """The quantum metric g_ab = Re Q_ab (Angstrom^2) at one k."""
     return np.real(quantum_geometric_tensor(model, k, n_occ, delta,
                                             gap_min))
 
 
-def quantum_weight(model, mesh=24, n_occ=1, delta=1e-5, gap_min=1e-8):
+def quantum_weight(model: TightBindingModel, mesh: int = 24, n_occ: int = 1,
+                   delta: float = 1e-5,
+                   gap_min: float = 1e-8) -> Dict[str, Any]:
     """The quantum-weight tensor and the QGT-integrated Chern number.
 
     Integrates over a Monkhorst-Pack mesh of the 2D Brillouin zone:

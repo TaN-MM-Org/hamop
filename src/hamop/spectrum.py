@@ -7,10 +7,16 @@ the eigenvalues are.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .eigsolve import gen_eigh
 from .model import KB, check_kgrid, fermi_dirac
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["bands", "dos", "fermi_level", "band_edges", "k_path"]
 
@@ -23,13 +29,17 @@ def _eigs(model, kpts, thresh):
     return np.array(out)
 
 
-def bands(model, kpts, thresh=1e-10):
+def bands(model: TightBindingModel, kpts: Iterable,
+          thresh: float = 1e-10) -> np.ndarray:
     """Eigenvalues along a list of Cartesian k-points; shape (nk, nao)."""
     return _eigs(model, kpts, thresh)
 
 
-def dos(model, energies, mesh=None, kpts=None, weights=None, eta=0.05,
-        thresh=1e-10):
+def dos(model: TightBindingModel, energies: ArrayLike,
+        mesh: Optional[Union[int, Sequence[int]]] = None,
+        kpts: Optional[ArrayLike] = None,
+        weights: Optional[ArrayLike] = None, eta: float = 0.05,
+        thresh: float = 1e-10) -> np.ndarray:
     """Gaussian-broadened density of states per unit cell (states / eV).
 
     Either ``mesh`` (a Monkhorst-Pack grid) or explicit ``kpts`` with
@@ -37,6 +47,8 @@ def dos(model, energies, mesh=None, kpts=None, weights=None, eta=0.05,
     integral over all energies equals the number of orbitals kept per
     cell.
     """
+    if not eta > 0:
+        raise ValueError("eta (the Gaussian width, eV) must be > 0")
     kpts, weights = _grid(model, mesh, kpts, weights)
     rho = np.zeros_like(np.asarray(energies, dtype=float))
     for k, w in zip(kpts, weights):
@@ -48,8 +60,11 @@ def dos(model, energies, mesh=None, kpts=None, weights=None, eta=0.05,
     return rho
 
 
-def fermi_level(model, filling, mesh=None, kpts=None, weights=None,
-                T=300.0, thresh=1e-10, tol=1e-10):
+def fermi_level(model: TightBindingModel, filling: float,
+                mesh: Optional[Union[int, Sequence[int]]] = None,
+                kpts: Optional[ArrayLike] = None,
+                weights: Optional[ArrayLike] = None, T: float = 300.0,
+                thresh: float = 1e-10, tol: float = 1e-10) -> float:
     """Chemical potential at which the mean band occupation per cell
     equals ``filling`` (states per cell, spin not included), by
     bisection on the Fermi-Dirac-weighted eigenvalue count."""
@@ -76,7 +91,11 @@ def fermi_level(model, filling, mesh=None, kpts=None, weights=None,
     return 0.5 * (lo + hi)
 
 
-def band_edges(model, mu, mesh=None, kpts=None, weights=None, thresh=1e-10):
+def band_edges(model: TightBindingModel, mu: float,
+               mesh: Optional[Union[int, Sequence[int]]] = None,
+               kpts: Optional[ArrayLike] = None,
+               weights: Optional[ArrayLike] = None,
+               thresh: float = 1e-10) -> Tuple[float, float, float]:
     """(valence-band maximum, conduction-band minimum, gap) about mu."""
     # weights play no role in the band edges, so they are not checked
     kpts, _ = _grid(model, mesh, kpts, None)
@@ -99,7 +118,8 @@ def _grid(model, mesh, kpts, weights):
     return check_kgrid(kpts, weights)
 
 
-def k_path(vertices, n_per_segment=30):
+def k_path(vertices: Sequence[ArrayLike], n_per_segment: int = 30
+           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Piecewise-linear path through Cartesian k-space vertices.
 
     Returns (kpts, distances, tick_distances): the interpolated points
@@ -108,6 +128,9 @@ def k_path(vertices, n_per_segment=30):
     usual ingredients of a band-structure plot.
     """
     vertices = [np.atleast_1d(np.asarray(v, dtype=float)) for v in vertices]
+    if len(vertices) < 2 or int(n_per_segment) < 1:
+        raise ValueError("k_path needs at least two vertices and "
+                         "n_per_segment >= 1")
     kpts = [vertices[0]]
     for a, b in zip(vertices[:-1], vertices[1:]):
         for s in range(1, int(n_per_segment) + 1):

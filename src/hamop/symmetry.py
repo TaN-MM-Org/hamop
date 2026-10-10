@@ -23,9 +23,15 @@ says so and the README repeats it.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Iterable, List, Sequence, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .eigsolve import gen_eigh
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["symmetry_fold", "find_point_group"]
 
@@ -57,8 +63,11 @@ def _group_closure(mats, max_order=48):
     return list(group.values())
 
 
-def symmetry_fold(model, mesh, ops, time_reversal=False, n_check=4,
-                  tol=1e-9, seed=0, thresh=1e-10):
+def symmetry_fold(model: TightBindingModel,
+                  mesh: Union[int, Sequence[int]],
+                  ops: Iterable[ArrayLike], time_reversal: bool = False,
+                  n_check: int = 4, tol: float = 1e-9, seed: int = 0,
+                  thresh: float = 1e-10) -> Tuple[np.ndarray, np.ndarray]:
     """Fold a Monkhorst-Pack grid by a point group; returns
     (kpts_cart, weights) usable wherever explicit k-points are accepted.
 
@@ -160,7 +169,9 @@ def symmetry_fold(model, mesh, ops, time_reversal=False, n_check=4,
     return kpts, weights
 
 
-def find_point_group(model, n_check=4, tol=1e-9, seed=0, thresh=1e-10):
+def find_point_group(model: TightBindingModel, n_check: int = 4,
+                     tol: float = 1e-9, seed: int = 0,
+                     thresh: float = 1e-10) -> List[np.ndarray]:
     """Detect the point group of a periodic model, self-validated.
 
     Candidate operations are enumerated exactly from the lattice: every

@@ -23,7 +23,10 @@ full device Green function.
 """
 from __future__ import annotations
 
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 __all__ = ["sancho_rubio", "transmission", "transmission_direct",
            "buttiker_transmission", "scba_transmission",
@@ -60,8 +63,11 @@ def _sigma_at(sigma_int, i, E, n):
     return s
 
 
-def sancho_rubio(E, H00, H01, S00=None, S01=None, eta=1e-6, maxiter=400,
-                 tol=1e-12, check_tol=1e-10):
+def sancho_rubio(E: float, H00: ArrayLike, H01: ArrayLike,
+                 S00: Optional[ArrayLike] = None,
+                 S01: Optional[ArrayLike] = None, eta: float = 1e-6,
+                 maxiter: int = 400, tol: float = 1e-12,
+                 check_tol: float = 1e-10) -> np.ndarray:
     """Retarded surface Green function of a semi-infinite periodic lead.
 
     H00: principal-layer block; H01: coupling from one layer to the
@@ -199,9 +205,14 @@ def _lead_sigmas(E, lead_H00, lead_H01, lead_S00, lead_S01, eta):
     return sigL, sigR, gamL, gamR
 
 
-def transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
-                 layers_S=None, coup_S=None, lead_S00=None, lead_S01=None,
-                 eta=1e-6, sigma_int=None):
+def transmission(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
+                 coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                 lead_H01: ArrayLike,
+                 layers_S: Optional[Sequence[Any]] = None,
+                 coup_S: Optional[Sequence[Any]] = None,
+                 lead_S00: Optional[ArrayLike] = None,
+                 lead_S01: Optional[ArrayLike] = None, eta: float = 1e-6,
+                 sigma_int: Optional[Dict[int, Any]] = None) -> np.ndarray:
     """T(E) by the recursive Green function sweep.
 
     layers_H[i]: on-layer Hamiltonian of device layer i.
@@ -262,9 +273,16 @@ def transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
     return T
 
 
-def transmission_direct(E_list, layers_H, coup_H, lead_H00, lead_H01,
-                        layers_S=None, coup_S=None, lead_S00=None,
-                        lead_S01=None, eta=1e-6, sigma_int=None):
+def transmission_direct(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
+                        coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                        lead_H01: ArrayLike,
+                        layers_S: Optional[Sequence[Any]] = None,
+                        coup_S: Optional[Sequence[Any]] = None,
+                        lead_S00: Optional[ArrayLike] = None,
+                        lead_S01: Optional[ArrayLike] = None,
+                        eta: float = 1e-6,
+                        sigma_int: Optional[Dict[int, Any]] = None
+                        ) -> np.ndarray:
     """T(E) by direct inversion of the full device Green function.
 
     Numerically exact reference for :func:`transmission` on small
@@ -308,10 +326,16 @@ def transmission_direct(E_list, layers_H, coup_H, lead_H00, lead_H01,
     return T
 
 
-def buttiker_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
-                          probe_layer, gamma, layers_S=None, coup_S=None,
-                          lead_S00=None, lead_S01=None, eta=1e-6,
-                          return_parts=False):
+def buttiker_transmission(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
+                          coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                          lead_H01: ArrayLike, probe_layer: int,
+                          gamma: float,
+                          layers_S: Optional[Sequence[Any]] = None,
+                          coup_S: Optional[Sequence[Any]] = None,
+                          lead_S00: Optional[ArrayLike] = None,
+                          lead_S01: Optional[ArrayLike] = None,
+                          eta: float = 1e-6, return_parts: bool = False
+                          ) -> Union[np.ndarray, Dict[str, np.ndarray]]:
     """Two-terminal transmission with one current-conserving dephasing
     probe (Buttiker, Phys. Rev. B 33, 3020 (1986)).
 
@@ -334,6 +358,8 @@ def buttiker_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
     p = int(probe_layer)
     if not 0 <= p < N:
         raise ValueError("probe_layer outside the device")
+    if not gamma >= 0:
+        raise ValueError("gamma (the probe broadening, eV) must be >= 0")
     sizes = [len(h) for h in layers_H]
     offs = np.concatenate([[0], np.cumsum(sizes)])
     ntot = offs[-1]
@@ -403,10 +429,16 @@ def _assemble_device(E, layers_H, coup_H, layers_S, coup_S, eta,
     return A, offs
 
 
-def scba_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01, W2,
-                      layers_S=None, coup_S=None, lead_S00=None,
-                      lead_S01=None, eta=1e-6, mixing=0.5, tol=1e-10,
-                      maxiter=1000, return_info=False):
+def scba_transmission(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
+                      coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                      lead_H01: ArrayLike, W2: ArrayLike,
+                      layers_S: Optional[Sequence[Any]] = None,
+                      coup_S: Optional[Sequence[Any]] = None,
+                      lead_S00: Optional[ArrayLike] = None,
+                      lead_S01: Optional[ArrayLike] = None,
+                      eta: float = 1e-6, mixing: float = 0.5,
+                      tol: float = 1e-10, maxiter: int = 1000,
+                      return_info: bool = False) -> Any:
     """Transmission through a device with an elastic self-consistent
     Born (SCBA) self-energy for uncorrelated on-site disorder.
 
@@ -439,6 +471,11 @@ def scba_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01, W2,
     coup_S = [None] * (N - 1) if coup_S is None else coup_S
     sizes = [len(h) for h in layers_H]
     W2 = np.broadcast_to(np.asarray(W2, dtype=float), (N,))
+    if not (np.all(np.isfinite(W2)) and np.all(W2 >= 0.0)):
+        raise ValueError("W2 (the disorder variance, eV^2) must be finite "
+                         "and >= 0")
+    if not 0.0 < mixing <= 1.0:
+        raise ValueError("mixing must lie in (0, 1]")
     T = np.zeros(len(E_list))
     info = {"sigma": [], "niter": [], "residual": []}
     for iE, E in enumerate(E_list):
@@ -486,9 +523,16 @@ def scba_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01, W2,
     return (T, info) if return_info else T
 
 
-def transmission_sparse(E_list, layers_H, coup_H, lead_H00, lead_H01,
-                        layers_S=None, coup_S=None, lead_S00=None,
-                        lead_S01=None, eta=1e-6, sigma_int=None):
+def transmission_sparse(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
+                        coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                        lead_H01: ArrayLike,
+                        layers_S: Optional[Sequence[Any]] = None,
+                        coup_S: Optional[Sequence[Any]] = None,
+                        lead_S00: Optional[ArrayLike] = None,
+                        lead_S01: Optional[ArrayLike] = None,
+                        eta: float = 1e-6,
+                        sigma_int: Optional[Dict[int, Any]] = None
+                        ) -> np.ndarray:
     """T(E) with the full device matrix stored sparse and factorized by
     sparse LU -- the large-device counterpart of
     :func:`transmission_direct`, solving only for the left-edge block
@@ -519,10 +563,18 @@ def transmission_sparse(E_list, layers_H, coup_H, lead_H00, lead_H01,
     return T
 
 
-def multiprobe_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
-                            gamma, probe_layers=None, layers_S=None,
-                            coup_S=None, lead_S00=None, lead_S01=None,
-                            eta=1e-6, return_parts=False):
+def multiprobe_transmission(E_list: ArrayLike,
+                            layers_H: Sequence[ArrayLike],
+                            coup_H: Sequence[ArrayLike],
+                            lead_H00: ArrayLike, lead_H01: ArrayLike,
+                            gamma: float,
+                            probe_layers: Optional[Iterable[int]] = None,
+                            layers_S: Optional[Sequence[Any]] = None,
+                            coup_S: Optional[Sequence[Any]] = None,
+                            lead_S00: Optional[ArrayLike] = None,
+                            lead_S01: Optional[ArrayLike] = None,
+                            eta: float = 1e-6, return_parts: bool = False
+                            ) -> Any:
     """Two-terminal conductance with current-conserving dephasing
     probes on many layers -- the D'Amato-Pastawski model (J. L. D'Amato
     and H. M. Pastawski, Phys. Rev. B 41, 7411 (1990)).
@@ -548,6 +600,8 @@ def multiprobe_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
         sorted(int(x) for x in probe_layers)
     if any(not 0 <= x < N for x in probes):
         raise ValueError("probe layer outside the device")
+    if not gamma >= 0:
+        raise ValueError("gamma (the probe broadening, eV) must be >= 0")
     sizes = [len(h) for h in layers_H]
     T_eff = np.zeros(len(E_list))
     parts = []
@@ -603,9 +657,17 @@ def multiprobe_transmission(E_list, layers_H, coup_H, lead_H00, lead_H01,
 
 # ---------------- local spectroscopy and current imaging ----------------
 
-def device_greens(E, layers_H, coup_H, lead_H00, lead_H01, layers_S=None,
-                  coup_S=None, lead_S00=None, lead_S01=None, eta=1e-6,
-                  sigma_int=None, attach_leads=True):
+def device_greens(E: float, layers_H: Sequence[ArrayLike],
+                  coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                  lead_H01: ArrayLike,
+                  layers_S: Optional[Sequence[Any]] = None,
+                  coup_S: Optional[Sequence[Any]] = None,
+                  lead_S00: Optional[ArrayLike] = None,
+                  lead_S01: Optional[ArrayLike] = None, eta: float = 1e-6,
+                  sigma_int: Optional[Dict[int, Any]] = None,
+                  attach_leads: bool = True
+                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
+                             np.ndarray]:
     """Full retarded device Green function with (optionally) the lead
     self-energies attached, plus the embedded broadening matrices.
 
@@ -637,9 +699,15 @@ def device_greens(E, layers_H, coup_H, lead_H00, lead_H01, layers_S=None,
     return G, offs, GamL, GamR
 
 
-def device_ldos(E_list, layers_H, coup_H, lead_H00, lead_H01,
-                layers_S=None, coup_S=None, lead_S00=None, lead_S01=None,
-                eta=1e-6, sigma_int=None, attach_leads=True):
+def device_ldos(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
+                coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                lead_H01: ArrayLike,
+                layers_S: Optional[Sequence[Any]] = None,
+                coup_S: Optional[Sequence[Any]] = None,
+                lead_S00: Optional[ArrayLike] = None,
+                lead_S01: Optional[ArrayLike] = None, eta: float = 1e-6,
+                sigma_int: Optional[Dict[int, Any]] = None,
+                attach_leads: bool = True) -> np.ndarray:
     """Orbital-resolved local density of states of the device,
     LDOS_i(E) = -Im (G S)_ii / pi (S = identity for orthogonal bases;
     Mulliken convention otherwise). Shape (len(E_list), n_orbitals).
@@ -677,8 +745,11 @@ def device_ldos(E_list, layers_H, coup_H, lead_H00, lead_H01,
     return out
 
 
-def bond_currents(E, layers_H, coup_H, lead_H00, lead_H01, eta=1e-9,
-                  sigma_int=None):
+def bond_currents(E: float, layers_H: Sequence[ArrayLike],
+                  coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
+                  lead_H01: ArrayLike, eta: float = 1e-9,
+                  sigma_int: Optional[Dict[int, Any]] = None
+                  ) -> Tuple[np.ndarray, np.ndarray]:
     """Energy-resolved bond-current map at zero temperature for
     left-lead injection, in transmission units (Paulsson and
     Brandbyge, Phys. Rev. B 76, 115117 (2007), orthogonal basis):

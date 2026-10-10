@@ -23,14 +23,22 @@ images; every observable then works at the single "k-point" k = 0.
 """
 from __future__ import annotations
 
+from typing import Optional, Sequence, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 __all__ = ["TightBindingModel"]
 
+# Physical constants: CODATA 2018 recommended values, E. Tiesinga,
+# P. J. Mohr, D. B. Newell and B. N. Taylor, Rev. Mod. Phys. 93, 025010
+# (2021).  KB is exact in the 2019 SI (k = 1.380649e-23 J/K divided by
+# e = 1.602176634e-19 C); ALPHA is the measured fine-structure constant.
 KB = 8.617333262e-5  # Boltzmann constant, eV / K (CODATA 2018)
+ALPHA = 7.2973525693e-3  # fine-structure constant (CODATA 2018)
 
 
-def fermi_dirac(e, mu, T):
+def fermi_dirac(e: ArrayLike, mu: float, T: float) -> np.ndarray:
     """Fermi-Dirac occupation at temperature T (kelvin), shared by every
     module that fills states.  T = 0 is the exact step, with 1/2 for a
     level exactly at mu (the T -> 0+ limit of f(mu) = 1/2), so a level
@@ -44,7 +52,7 @@ def fermi_dirac(e, mu, T):
     return 1.0 / (1.0 + np.exp(x))
 
 
-def check_kgrid(kpts, weights, wtol=1e-6):
+def check_kgrid(kpts, weights, wtol: float = 1e-6):
     """Validate an explicit k-point list and its weights.
 
     Returns (kpts, weights) with uniform weights when none are given.
@@ -81,8 +89,11 @@ class TightBindingModel:
     finite system.
     """
 
-    def __init__(self, positions, norb, cell=None):
+    def __init__(self, positions: ArrayLike, norb: Union[int, ArrayLike],
+                 cell: Optional[ArrayLike] = None) -> None:
         self.positions = np.atleast_2d(np.asarray(positions, dtype=float))
+        if not np.all(np.isfinite(self.positions)):
+            raise ValueError("site positions must be finite")
         n_site = self.positions.shape[0]
         if np.isscalar(norb):
             self.norb = np.full(n_site, int(norb))
@@ -90,15 +101,26 @@ class TightBindingModel:
             self.norb = np.asarray(norb, dtype=int)
             if self.norb.shape != (n_site,):
                 raise ValueError("norb must be scalar or one entry per site")
+        if np.any(self.norb < 1):
+            raise ValueError("every site needs at least one orbital "
+                             "(norb >= 1)")
         self.cell = None if cell is None else np.atleast_2d(
             np.asarray(cell, dtype=float))
+        if self.cell is not None and \
+                self.cell.shape[1] != self.positions.shape[1]:
+            raise ValueError(
+                f"lattice vectors have {self.cell.shape[1]} Cartesian "
+                f"components but the positions have "
+                f"{self.positions.shape[1]}; give both in the same "
+                "Cartesian dimension")
         self.offsets = np.concatenate([[0], np.cumsum(self.norb)])
         self.nao = int(self.offsets[-1])
         self._hops = []
         self._dipoles = {}
 
     # ------------------------------------------------------------------
-    def add_hop(self, i, j, image, H_block, S_block=None):
+    def add_hop(self, i: int, j: int, image: ArrayLike, H_block: ArrayLike,
+                S_block: Optional[ArrayLike] = None) -> None:
         """Add one directed hopping block (the reverse partner is implied).
 
         image: integer lattice vector of the cell containing site j
@@ -111,10 +133,15 @@ class TightBindingModel:
         terms may be added in several calls (e.g. a Zeeman term after
         :func:`hamop.with_spin`) without changing S.
         """
-        i, j = int(i), int(j)
+        i, j = self._site_index(i), self._site_index(j)
         image = tuple(int(m) for m in np.atleast_1d(image))
         if self.cell is None and any(image):
             raise ValueError("finite system: image must be zero")
+        if self.cell is not None and len(image) != self.cell.shape[0]:
+            raise ValueError(
+                f"image {image} has {len(image)} components but the cell "
+                f"has {self.cell.shape[0]} lattice vectors; give one "
+                "integer per lattice vector")
         H_block = np.asarray(H_block, dtype=complex)
         if H_block.shape != (self.norb[i], self.norb[j]):
             raise ValueError(
@@ -131,11 +158,25 @@ class TightBindingModel:
                 raise ValueError("on-site overlap block must be Hermitian")
         self._hops.append((i, j, image, H_block, S_block))
 
-    def has_overlap(self):
+    def _site_index(self, i) -> int:
+        """A site index in [0, nsite).  Negative (Python-style) indices
+        are refused: before 0.12.0 they passed the shape check but
+        assembled at the wrong orbital offset, so the block was silently
+        dropped from H(k)."""
+        n_site = len(self.norb)
+        i = int(i)
+        if not 0 <= i < n_site:
+            raise ValueError(f"site index {i} outside [0, {n_site}); this "
+                             f"model has {n_site} sites (negative indices "
+                             "are not accepted)")
+        return i
+
+    def has_overlap(self) -> bool:
+        """True when any hopping block carries an overlap block."""
         return any(h[4] is not None for h in self._hops)
 
     # ------------------------------------------------------------------
-    def set_dipole(self, i, X):
+    def set_dipole(self, i: int, X: ArrayLike) -> None:
         """Intra-atomic dipole matrix elements of site ``i``.
 
         X: array of shape (norb_i, norb_i, dim) -- the on-site position
@@ -148,7 +189,7 @@ class TightBindingModel:
         basis (see ``hamop.kubo``); ``kpm_sigma`` refuses overlap models
         altogether.
         """
-        i = int(i)
+        i = self._site_index(i)
         X = np.asarray(X, dtype=complex)
         dim = self.positions.shape[1]
         if X.shape != (self.norb[i], self.norb[i], dim):
@@ -161,10 +202,10 @@ class TightBindingModel:
                                  "per direction")
         self._dipoles[i] = X
 
-    def has_dipoles(self):
+    def has_dipoles(self) -> bool:
         return bool(self._dipoles)
 
-    def dipole_matrix(self, direction=0):
+    def dipole_matrix(self, direction: int = 0) -> np.ndarray:
         """Block-diagonal intra-atomic dipole operator X_a (nao x nao),
         zero wherever no dipole block was set."""
         X = np.zeros((self.nao, self.nao), dtype=complex)
@@ -212,7 +253,8 @@ class TightBindingModel:
                            np.eye(self.norb[i], dtype=complex))
 
     # ------------------------------------------------------------------
-    def bloch(self, k=None):
+    def bloch(self, k: Optional[ArrayLike] = None
+              ) -> Tuple[np.ndarray, np.ndarray]:
         """H(k), S(k) as dense Hermitian matrices.
 
         k: Cartesian wave vector (1/Angstrom); None means k = 0.  For a
@@ -235,7 +277,9 @@ class TightBindingModel:
             S = np.eye(self.nao, dtype=complex)
         return H, S
 
-    def bloch_derivative(self, k=None, direction=0):
+    def bloch_derivative(self, k: Optional[ArrayLike] = None,
+                         direction: int = 0
+                         ) -> Tuple[np.ndarray, np.ndarray]:
         """dH/dk and dS/dk along a Cartesian direction, at wave vector k.
 
         These are the matrices the Kubo velocity operator is built from;
@@ -264,7 +308,7 @@ class TightBindingModel:
         return k
 
     # ------------------------------------------------------------------
-    def all_blocks_real(self):
+    def all_blocks_real(self) -> bool:
         """True when every stored H and S block is real, in which case
         H(-k) = conj(H(k)) and the spectrum is even in k (spinless
         time-reversal symmetry of the assembly)."""
@@ -272,7 +316,9 @@ class TightBindingModel:
                    and (Sb is None or np.all(Sb.imag == 0.0))
                    for _, _, _, Hb, Sb in self._hops)
 
-    def monkhorst_pack(self, mesh, time_reversal=False):
+    def monkhorst_pack(self, mesh: Union[int, Sequence[int]],
+                       time_reversal: bool = False
+                       ) -> Tuple[np.ndarray, np.ndarray]:
         """Uniform Gamma-centered k-grid over the Brillouin zone.
 
         mesh: number of points per reciprocal direction (int or sequence
@@ -284,13 +330,22 @@ class TightBindingModel:
         observables -- eigenvalue sums, the DOS, sigma_xx, the Drude
         weight.  The fold is guaranteed only when every real-space block
         is real, so that H(-k) = conj(H(k)); a model with complex blocks
-        (e.g. Haldane) is refused rather than silently averaged.
+        (e.g. Haldane) is refused rather than silently averaged.  Since
+        0.12.0 the intra-atomic dipole blocks (``set_dipole``) must be
+        real as well: a complex dipole block leaves the eigenvalues even
+        in k but not the optical matrix elements, so the folded grid
+        gave a wrong sigma_xx (up to 12 % off in the regression test).
         """
         if self.cell is None:
             raise ValueError("finite system has no Brillouin zone")
         dim = self.cell.shape[0]
         if np.isscalar(mesh):
             mesh = (int(mesh),) * dim
+        mesh = tuple(int(n) for n in mesh)
+        if len(mesh) != dim or min(mesh) < 1:
+            raise ValueError(f"mesh must give {dim} positive point "
+                             f"count(s), one per lattice vector; got "
+                             f"{mesh}")
         recip = 2.0 * np.pi * np.linalg.inv(self.cell).T
         if not time_reversal:
             grids = [np.arange(n) / n for n in mesh]
@@ -304,6 +359,14 @@ class TightBindingModel:
                 "time_reversal=True needs every real-space block real "
                 "(H(-k) = conj(H(k))); this model has complex blocks, "
                 "so the k <-> -k fold is not guaranteed exact")
+        if any(np.any(X.imag != 0.0) for X in self._dipoles.values()):
+            raise ValueError(
+                "time_reversal=True: this model has complex intra-atomic "
+                "dipole blocks (set_dipole), so the optical matrix "
+                "elements at k and -k differ and the fold would be wrong "
+                "for sigma_optical and sigma_tensor; use "
+                "the full grid (time_reversal=False), or symmetry_fold("
+                "..., time_reversal=True) for eigenvalue-only quantities")
         ntot = int(np.prod(mesh))
         frac_rows, weights = [], []
         for flat in range(ntot):
@@ -321,7 +384,7 @@ class TightBindingModel:
         return kpts, np.asarray(weights)
 
     @property
-    def cell_volume(self):
+    def cell_volume(self) -> float:
         """Length / area / volume of the unit cell (Angstrom^dim)."""
         if self.cell is None:
             raise ValueError("finite system has no cell")

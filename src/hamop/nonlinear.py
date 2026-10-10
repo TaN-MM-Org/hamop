@@ -33,14 +33,20 @@ time and device geometry this package has no business guessing.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Dict, Tuple
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .berry import berry_curvature
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["band_curvatures", "berry_dipole", "fermi_occupation"]
 
 
-def fermi_occupation(e, mu, kT):
+def fermi_occupation(e: ArrayLike, mu: float, kT: float) -> np.ndarray:
     """Fermi-Dirac occupation; kT = 0 gives the exact step."""
     e = np.asarray(e, dtype=float)
     if kT < 0:
@@ -57,7 +63,9 @@ def _dfermi_deps(e, mu, kT):
     return -1.0 / (4.0 * kT * np.cosh(x) ** 2)
 
 
-def band_curvatures(model, mesh, solver="dense"):
+def band_curvatures(model: TightBindingModel, mesh: int,
+                    solver: str = "dense"
+                    ) -> Tuple[np.ndarray, np.ndarray]:
     """Band-resolved lattice Berry curvature on an N x N mesh.
 
     Returns (energies, omega): energies (N, N, nb) from the Bloch
@@ -111,7 +119,9 @@ def band_curvatures(model, mesh, solver="dense"):
     return energies, F / a_plaq
 
 
-def berry_dipole(model, mesh, mu, kT, method="grad", solver="dense"):
+def berry_dipole(model: TightBindingModel, mesh: int, mu: float, kT: float,
+                 method: str = "grad",
+                 solver: str = "dense") -> Dict[str, np.ndarray]:
     """Berry curvature dipole D = (D_x, D_y) in Angstrom.
 
     mesh : N for the N x N Brillouin-zone mesh (symmetry cancellations

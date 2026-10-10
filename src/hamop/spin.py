@@ -36,7 +36,7 @@ PAULI = {
 }
 
 
-def with_spin(model):
+def with_spin(model: TightBindingModel) -> TightBindingModel:
     """Spinful copy of a spinless model: every H and S block is tensored
     with the 2 x 2 identity (spin innermost), so each band becomes an
     exact doublet.  Intra-atomic dipole blocks (``set_dipole``) are
@@ -57,7 +57,8 @@ def with_spin(model):
     return m
 
 
-def kane_mele(t1=-1.0, lam_so=0.05, a=1.0):
+def kane_mele(t1: float = -1.0, lam_so: float = 0.05,
+              a: float = 1.0) -> TightBindingModel:
     """Kane-Mele model with S_z conserved (Kane and Mele, PRL 95,
     226801 (2005)): nearest-neighbour hop t1 (spin diagonal) plus the
     intrinsic spin-orbit term i lambda_so nu_ij s_z on second

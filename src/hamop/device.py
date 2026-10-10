@@ -16,12 +16,18 @@ undersized layer width is refused.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Dict
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["principal_layers"]
 
 
-def principal_layers(model, layer_width, axis=0, tol=1e-12):
+def principal_layers(model: TightBindingModel, layer_width: float,
+                     axis: int = 0, tol: float = 1e-12) -> Dict[str, Any]:
     """Partition a finite model into principal layers along an axis.
 
     layer_width: layer thickness in the model's length unit; must be at

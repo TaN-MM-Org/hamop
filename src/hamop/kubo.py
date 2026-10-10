@@ -2,9 +2,11 @@
 
 The velocity operator uses the standard atomistic (Peierls-like)
 position gauge: the position operator is taken diagonal at the sites,
-so dH/dk carries a factor of the inter-site displacement and the
-intra-atomic dipole contribution is neglected -- the common
-approximation in tight-binding optics.  In a nonorthogonal basis the
+so dH/dk carries a factor of the inter-site displacement -- the common
+approximation in tight-binding optics.  The intra-atomic dipole
+contribution is left out unless the model carries on-site position
+blocks (``TightBindingModel.set_dipole``), which then add
+i (E_n - E_m) <n|X|m> to the matrix element.  In a nonorthogonal basis the
 interband matrix element at k is
 
     M_nm = <n| dH/dk - (e_n + e_m)/2  dS/dk |m>,
@@ -23,10 +25,16 @@ Spin degeneracy enters as the explicit factor ``spin`` (default 2).
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .eigsolve import gen_eigh
 from .model import KB, check_kgrid, fermi_dirac
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["sigma_optical", "sigma_tensor", "carrier_count",
            "drude_weight"]
@@ -62,9 +70,13 @@ def _dipole_term(model, c, e, direction):
     return 1j * (e[:, None] - e[None, :]) * Xn
 
 
-def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
-                  T=300.0, eta=0.05, direction=0, spin=2, thresh=1e-10,
-                  lineshape="gaussian"):
+def sigma_optical(model: TightBindingModel, omega: ArrayLike, mu: float,
+                  mesh: Optional[Union[int, Sequence[int]]] = None,
+                  kpts: Optional[ArrayLike] = None,
+                  weights: Optional[ArrayLike] = None, T: float = 300.0,
+                  eta: float = 0.05, direction: int = 0,
+                  spin: float = 2, thresh: float = 1e-10,
+                  lineshape: str = "gaussian") -> np.ndarray:
     """Real part of the optical sheet conductivity, in units of e^2/(4 hbar).
 
     omega: photon energies (eV, > 0).  mu: chemical potential (eV).
@@ -74,9 +86,13 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
     (cell=None) the "cell volume" is absent and the result is the
     conductivity times the system area; divide by your geometric area.
     """
-    omega = np.asarray(omega, dtype=float)
+    omega = np.atleast_1d(np.asarray(omega, dtype=float))
     if np.any(omega <= 0):
         raise ValueError("omega must be positive photon energies")
+    if not eta > 0:
+        raise ValueError("eta (the line width, eV) must be > 0")
+    if lineshape not in ("gaussian", "lorentzian"):
+        raise ValueError("lineshape must be gaussian or lorentzian")
     _check_T(T)
     if mesh is not None or kpts is not None:
         if mesh is not None:
@@ -118,8 +134,13 @@ def sigma_optical(model, omega, mu, mesh=None, kpts=None, weights=None,
     return sig * spin * 4.0 * np.pi / area
 
 
-def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
-                 weights=None, T=300.0, eta=1e-3, spin=2, thresh=1e-10):
+def sigma_tensor(model: TightBindingModel, omega: ArrayLike, mu: float,
+                 directions: Tuple[int, int] = (0, 1),
+                 mesh: Optional[Union[int, Sequence[int]]] = None,
+                 kpts: Optional[ArrayLike] = None,
+                 weights: Optional[ArrayLike] = None, T: float = 300.0,
+                 eta: float = 1e-3, spin: float = 2,
+                 thresh: float = 1e-10) -> np.ndarray:
     """Complex interband conductivity tensor component sigma_ab(omega),
     in units of e^2 / (4 hbar).
 
@@ -148,6 +169,9 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
     """
     a, b = directions
     omega = np.atleast_1d(np.asarray(omega, dtype=float))
+    if not eta >= 0:
+        raise ValueError("eta must be >= 0 (a negative eta gives the "
+                         "advanced, not the retarded, response)")
     _check_T(T)
     if mesh is not None or kpts is not None:
         if mesh is not None:
@@ -189,8 +213,11 @@ def sigma_tensor(model, omega, mu, directions=(0, 1), mesh=None, kpts=None,
     return sig * (-4j) * spin / area
 
 
-def carrier_count(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
-                  spin=2, thresh=1e-10):
+def carrier_count(model: TightBindingModel, mu: float,
+                  mesh: Optional[Union[int, Sequence[int]]] = None,
+                  kpts: Optional[ArrayLike] = None,
+                  weights: Optional[ArrayLike] = None, T: float = 300.0,
+                  spin: float = 2, thresh: float = 1e-10) -> float:
     """Mean number of occupied states per unit cell (spin included).
 
     A periodic model needs ``mesh`` or ``kpts``; a finite model
@@ -212,8 +239,12 @@ def carrier_count(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
     return n
 
 
-def drude_weight(model, mu, mesh=None, kpts=None, weights=None, T=300.0,
-                 direction=0, spin=2, thresh=1e-10):
+def drude_weight(model: TightBindingModel, mu: float,
+                 mesh: Optional[Union[int, Sequence[int]]] = None,
+                 kpts: Optional[ArrayLike] = None,
+                 weights: Optional[ArrayLike] = None, T: float = 300.0,
+                 direction: int = 0, spin: float = 2,
+                 thresh: float = 1e-10) -> float:
     """Intraband (Drude) weight, in units of e^2/(4 hbar) times eV.
 
     Defined so that the intraband part of the conductivity, in the same

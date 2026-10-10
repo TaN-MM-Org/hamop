@@ -21,10 +21,16 @@ sources through :class:`TightBindingModel` grids.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Iterable, Sequence, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .berry import _bloch_periodic
 from .eigsolve import gen_eigh
+
+if TYPE_CHECKING:
+    from .model import TightBindingModel
 
 __all__ = ["fourier_interpolation", "FourierInterpolator"]
 
@@ -38,7 +44,7 @@ class FourierInterpolator:
         self._S = S_R
         self._recip = recip
 
-    def bloch(self, k):
+    def bloch(self, k: ArrayLike) -> Tuple[np.ndarray, np.ndarray]:
         """Interpolated H(k), S(k) in the periodic gauge (same
         eigenvalues as the atomic gauge; the gauge only reshuffles
         eigenvector phases)."""
@@ -51,7 +57,8 @@ class FourierInterpolator:
         S = np.tensordot(ph, self._S, axes=(0, 0))
         return H, 0.5 * (S + S.conj().T)
 
-    def bands(self, kpts, thresh=1e-10):
+    def bands(self, kpts: Iterable[ArrayLike],
+              thresh: float = 1e-10) -> np.ndarray:
         """Eigenvalues along a k-list, shape (nk, nao)."""
         out = []
         for k in kpts:
@@ -60,7 +67,9 @@ class FourierInterpolator:
         return np.array(out)
 
 
-def fourier_interpolation(model, mesh):
+def fourier_interpolation(model: TightBindingModel,
+                          mesh: Union[int, Sequence[int]]
+                          ) -> FourierInterpolator:
     """Build a Fourier interpolant of ``model`` from an N^dim periodic-
     gauge sample of its Bloch matrices.
 

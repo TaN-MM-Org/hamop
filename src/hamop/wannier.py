@@ -39,7 +39,11 @@ corrupted file.
 """
 from __future__ import annotations
 
+from os import PathLike
+from typing import Any, Dict, Optional, Tuple, Union
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .model import TightBindingModel
 
@@ -47,7 +51,9 @@ __all__ = ["load_wannier90_hr", "save_wannier90_hr", "from_wannier90",
            "load_wannier90_tb", "from_wannier90_tb"]
 
 
-def load_wannier90_hr(path, hermitian_tol=1e-6):
+def load_wannier90_hr(path: Union[str, PathLike],
+                      hermitian_tol: float = 1e-6
+                      ) -> Tuple[Dict[tuple, np.ndarray], int]:
     """Parse a Wannier90 ``seedname_hr.dat`` file.
 
     Returns (H_R, num_wann): H_R is a dict mapping the integer
@@ -149,22 +155,40 @@ def _check_hermitian(H_R, hermitian_tol, what):
                 "silently")
 
 
-def save_wannier90_hr(path, H_R, comment="written by hamop"):
+def save_wannier90_hr(path: Union[str, PathLike],
+                      H_R: Dict[tuple, ArrayLike],
+                      comment: str = "written by hamop") -> None:
     """Write an R-space Hamiltonian in the hr.dat format (unit
     degeneracies). Blocks must satisfy H(R) = H(-R)^dagger; the exact
-    load round trip is asserted in the tests."""
+    load round trip is asserted in the tests.
+
+    comment : the header line. Line breaks and runs of white space are
+        collapsed to single spaces, and an empty comment is written as
+        "written by hamop", because the header must be one non-blank
+        line for the file to be read back."""
     Rs = sorted(H_R.keys())
     if not Rs:
         raise ValueError("H_R is empty")
     nw = np.asarray(H_R[Rs[0]]).shape[0]
+    blocks = {}
+    for R in Rs:                         # validate before writing
+        if not 1 <= len(tuple(R)) <= 3:
+            raise ValueError(f"R-vector {R} must have 1 to 3 integer "
+                             "components")
+        blk = np.asarray(H_R[R], dtype=complex)
+        if blk.shape != (nw, nw):
+            raise ValueError("all blocks must share one shape")
+        blocks[R] = blk
+    # the header must be exactly one non-blank line: the readers skip
+    # blank lines, so an empty comment (or one with a line break) made
+    # a file that load_wannier90_hr could not read back (before 0.12.0)
+    comment = " ".join(str(comment).split()) or "written by hamop"
     with open(path, "w") as fh:
         fh.write(f"{comment}\n{nw}\n{len(Rs)}\n")
         for start in range(0, len(Rs), 15):
             fh.write(" ".join("1" for _ in Rs[start:start + 15]) + "\n")
         for R in Rs:
-            blk = np.asarray(H_R[R], dtype=complex)
-            if blk.shape != (nw, nw):
-                raise ValueError("all blocks must share one shape")
+            blk = blocks[R]
             Rpad = tuple(R) + (0,) * (3 - len(R))
             for n in range(nw):          # column outer, row inner --
                 for m in range(nw):      # the wannier90 line order
@@ -174,8 +198,9 @@ def save_wannier90_hr(path, H_R, comment="written by hamop"):
                              f"{v.real:22.10f}{v.imag:22.10f}\n")
 
 
-def from_wannier90(path, cell, centers=None,
-                   hermitian_tol=1e-6) -> TightBindingModel:
+def from_wannier90(path: Union[str, PathLike], cell: ArrayLike,
+                   centers: Optional[ArrayLike] = None,
+                   hermitian_tol: float = 1e-6) -> TightBindingModel:
     """Build a `TightBindingModel` from a ``seedname_hr.dat`` file.
 
     cell : (dim, dim) lattice vectors as rows, in Angstrom -- hr.dat
@@ -251,7 +276,9 @@ def _build_model(H_R, nw, cell, pos):
 
 # ---------------- seedname_tb.dat: cell, H(R) and r(R) in one file ----
 
-def load_wannier90_tb(path, hermitian_tol=1e-6):
+def load_wannier90_tb(path: Union[str, PathLike],
+                      hermitian_tol: float = 1e-6
+                      ) -> Dict[str, Any]:
     """Parse a Wannier90 ``seedname_tb.dat`` file (new in 0.11.0).
 
     The layout follows the Wannier90 user guide ("Files" chapter) and
@@ -367,8 +394,9 @@ def load_wannier90_tb(path, hermitian_tol=1e-6):
     return {"cell": cell, "H_R": H_R, "r_R": r_R, "num_wann": num_wann}
 
 
-def from_wannier90_tb(path, dim=None, hermitian_tol=1e-6,
-                      cell_tol=1e-8) -> TightBindingModel:
+def from_wannier90_tb(path: Union[str, PathLike], dim: Optional[int] = None,
+                      hermitian_tol: float = 1e-6,
+                      cell_tol: float = 1e-8) -> TightBindingModel:
     """Build a `TightBindingModel` from ``seedname_tb.dat`` alone (new
     in 0.11.0): the file carries the lattice vectors and the position
     matrix elements, so neither the cell nor the Wannier centres have

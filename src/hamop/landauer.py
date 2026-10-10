@@ -52,7 +52,10 @@ from `transmission`, approaches spin times its closed-form T(mu).
 """
 from __future__ import annotations
 
+from typing import Dict
+
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .model import KB, fermi_dirac
 
@@ -85,6 +88,10 @@ def _prepare(E, trans, mus, T, window):
         raise ValueError("energies and transmission must be finite")
     if np.any(np.diff(E) <= 0.0):
         raise ValueError("energies must be strictly increasing")
+    if not window > 0:
+        raise ValueError("window must be > 0 (the number of kT the grid "
+                         "must reach beyond the chemical potentials; 30 "
+                         "leaves a tail below 1e-10)")
     if not T > 0:
         raise ValueError("T must be > 0 K: the Fermi window is resolved "
                          "on the energy grid (at T = 0 the conductance "
@@ -113,7 +120,9 @@ def _moments(E, tr, mu, T):
     return (_trapz(w, E), _trapz(w * x, E), _trapz(w * x * x, E))
 
 
-def landauer_conductance(E, trans, mu, T, spin=2, window=30.0):
+def landauer_conductance(E: ArrayLike, trans: ArrayLike, mu: float,
+                         T: float, spin: float = 2,
+                         window: float = 30.0) -> float:
     """Linear-response conductance at temperature T, in units of e^2/h.
 
     E : increasing energies (eV) at which T(E) was computed.
@@ -131,7 +140,9 @@ def landauer_conductance(E, trans, mu, T, spin=2, window=30.0):
     return spin * _moments(E, tr, mu, T)[0]
 
 
-def thermoelectric(E, trans, mu, T, spin=2, window=30.0):
+def thermoelectric(E: ArrayLike, trans: ArrayLike, mu: float, T: float,
+                   spin: float = 2, window: float = 30.0
+                   ) -> Dict[str, float]:
     """Linear-response thermoelectric coefficients from T(E).
 
     Returns a dict with
@@ -155,7 +166,9 @@ def thermoelectric(E, trans, mu, T, spin=2, window=30.0):
             "L0": L0, "L1": L1, "L2": L2}
 
 
-def landauer_current(E, trans, mu_L, mu_R, T, spin=2, window=30.0):
+def landauer_current(E: ArrayLike, trans: ArrayLike, mu_L: float,
+                     mu_R: float, T: float, spin: float = 2,
+                     window: float = 30.0) -> float:
     """Current from left to right at bias mu_L - mu_R, in units of
     (e^2/h) V.
 

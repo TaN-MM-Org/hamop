@@ -43,7 +43,8 @@ def _line_integral(phi, r_i, r_j, gauge):
     return 2.0 * np.pi * phi * val
 
 
-def with_peierls(model, phi, gauge="landau"):
+def with_peierls(model: TightBindingModel, phi: float,
+                 gauge: str = "landau") -> TightBindingModel:
     """Copy of a *finite* model with a uniform out-of-plane magnetic
     field applied by Peierls substitution.
 
@@ -85,7 +86,8 @@ def with_peierls(model, phi, gauge="landau"):
     return m
 
 
-def magnetic_supercell(model, p, q):
+def magnetic_supercell(model: TightBindingModel, p: int,
+                       q: int) -> TightBindingModel:
     """Magnetic supercell of a *periodic 2D* model at rational flux
     p/q per unit cell (in units of the flux quantum): q cells along the
     first lattice vector, Peierls phases in the oblique-coordinate
