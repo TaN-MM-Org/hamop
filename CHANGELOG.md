@@ -5,6 +5,25 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## 0.12.1 (2026-10-10)
+
+Citation correction and packaging.
+
+### Fixed (documentation)
+
+- `sparse.py` (`kpm_sigma` and the module docstring): the double
+  Chebyshev expansion and the finite-temperature optical conductivity
+  were credited to Sec. V of Weisse et al., Rev. Mod. Phys. 78, 275
+  (2006). That section compares the method with other numerical
+  approaches; the expansion is in Sec. II.E and the conductivity in
+  Sec. III.D, which are now cited.
+- Packaging: the license is now given as the SPDX expression
+  `license = "Apache-2.0"` with `license-files = ["LICENSE"]`, and the
+  old license table and license classifier are gone. Building no longer
+  prints setuptools' deprecation warnings (their support ends on
+  2027-02-18). Building from source now needs setuptools 77 or newer;
+  installing the package is unchanged.
+
 ## 0.12.0 (2026-10-10)
 
 Two tools for a lab's own measurements, three bugs fixed, and input
