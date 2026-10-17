@@ -36,6 +36,9 @@ __all__ = ["TightBindingModel"]
 # e = 1.602176634e-19 C); ALPHA is the measured fine-structure constant.
 KB = 8.617333262e-5  # Boltzmann constant, eV / K (CODATA 2018)
 ALPHA = 7.2973525693e-3  # fine-structure constant (CODATA 2018)
+# elementary charge in coulomb, exact in the 2019 SI (CODATA 2018 lists
+# it as exact); used only to turn e^2 dn/dmu into farad (new in 0.13.0)
+E_CHARGE = 1.602176634e-19
 
 
 def fermi_dirac(e: ArrayLike, mu: float, T: float) -> np.ndarray:
@@ -308,6 +311,49 @@ class TightBindingModel:
         return k
 
     # ------------------------------------------------------------------
+    # Many k-points at once (new in 0.13.0).  The same blocks, phases and
+    # Hermitization as `bloch` / `bloch_derivative`, assembled for a whole
+    # array of k-points with one NumPy operation per block instead of one
+    # Python loop per k-point.  The tests compare them with the per-k
+    # methods to 1e-13.
+    def _karray(self, kpts) -> np.ndarray:
+        """(nk, dim) float array of k-points; None entries mean k = 0."""
+        dim = self.positions.shape[1]
+        if isinstance(kpts, np.ndarray) and kpts.dtype != object:
+            K = np.asarray(kpts, dtype=float)
+            if K.ndim == 2 and K.shape[1] == dim and K.shape[0] > 0:
+                return K                          # fast path: (nk, dim)
+            if K.ndim == 1 and dim == 1 and K.shape[0] > 0:
+                return K.reshape(-1, 1)           # 1D model, scalar k's
+        rows = [np.zeros(dim) if k is None else self._kvec(k) for k in kpts]
+        if not rows:
+            raise ValueError("empty k-point list")
+        return np.array(rows, dtype=float).reshape(len(rows), dim)
+
+    def _bloch_many(self, K: np.ndarray, direction: Optional[int] = None
+                    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """H(k), S(k) for every row of K (shape (nk, nao, nao)); with
+        ``direction`` the k-derivatives dH/dk, dS/dk instead.  S (or dS)
+        is None for an orthogonal model (S = identity, dS = 0)."""
+        nk = K.shape[0]
+        n = self.nao
+        overlap = self.has_overlap()
+        H = np.zeros((nk, n, n), dtype=complex)
+        S = np.zeros((nk, n, n), dtype=complex) if overlap else None
+        for oi, oj, d, Hb, Sb in self._terms():
+            ph = np.exp(1j * (K @ d))
+            if direction is not None:
+                ph = 1j * d[direction] * ph
+            ni, nj = Hb.shape
+            H[:, oi:oi + ni, oj:oj + nj] += ph[:, None, None] * Hb
+            if overlap:
+                S[:, oi:oi + ni, oj:oj + nj] += ph[:, None, None] * Sb
+        H = 0.5 * (H + np.conj(np.swapaxes(H, 1, 2)))
+        if overlap:
+            S = 0.5 * (S + np.conj(np.swapaxes(S, 1, 2)))
+        return H, S
+
+    # ------------------------------------------------------------------
     def all_blocks_real(self) -> bool:
         """True when every stored H and S block is real, in which case
         H(-k) = conj(H(k)) and the spectrum is even in k (spinless
@@ -328,7 +374,8 @@ class TightBindingModel:
         time_reversal=True folds k and -k into one point of doubled
         weight (roughly halving the work), which is exact for k-even
         observables -- eigenvalue sums, the DOS, sigma_xx, the Drude
-        weight.  The fold is guaranteed only when every real-space block
+        weight -- but not for the Hall component sigma_xy of
+        ``sigma_tensor``, whose integrand is not even in k.  The fold is guaranteed only when every real-space block
         is real, so that H(-k) = conj(H(k)); a model with complex blocks
         (e.g. Haldane) is refused rather than silently averaged.  Since
         0.12.0 the intra-atomic dipole blocks (``set_dipole``) must be

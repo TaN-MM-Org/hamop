@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Union
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .eigsolve import gen_eigh
+from .eigsolve import _eig_chunks
 from .model import KB, check_kgrid, fermi_dirac
 
 if TYPE_CHECKING:
@@ -66,8 +66,26 @@ def _dipole_term(model, c, e, direction):
     energy-difference-preserving), which the tests assert."""
     if not model.has_dipoles():
         return None
-    Xn = c.conj().T @ model.dipole_matrix(direction) @ c
-    return 1j * (e[:, None] - e[None, :]) * Xn
+    ch = np.conj(np.swapaxes(c, -1, -2))
+    Xn = ch @ model.dipole_matrix(direction) @ c
+    return 1j * (e[..., :, None] - e[..., None, :]) * Xn
+
+
+def _velocity(model, e, c, deriv, direction):
+    """Interband velocity matrix elements M_nm for a block of k-points
+    (shapes: e (m, nb), c (m, nao, nb), deriv = (dH, dS) at those
+    k-points): <n| dH/dk - (e_n + e_m)/2 dS/dk |m> plus the intra-atomic
+    dipole term.  The overlap term is skipped when dS is None (an
+    orthogonal model, where dS/dk = 0)."""
+    dH, dS = deriv
+    ch = np.conj(np.swapaxes(c, 1, 2))
+    M = ch @ dH @ c
+    if dS is not None:
+        M = M - 0.5 * (e[:, :, None] + e[:, None, :]) * (ch @ dS @ c)
+    Xt = _dipole_term(model, c, e, direction)
+    if Xt is not None:
+        M = M + Xt
+    return M
 
 
 def sigma_optical(model: TightBindingModel, omega: ArrayLike, mu: float,
@@ -106,30 +124,23 @@ def sigma_optical(model: TightBindingModel, omega: ArrayLike, mu: float,
         kpts, weights, area = [None], [1.0], 1.0
 
     sig = np.zeros_like(omega)
-    for k, w in zip(kpts, weights):
-        H, S = model.bloch(k)
-        dH, dS = model.bloch_derivative(k, direction)
-        e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
+    for w, e, c, der in _eig_chunks(model, kpts, weights, thresh=thresh,
+                                    vectors=True, directions=(direction,)):
+        M = _velocity(model, e, c, der[direction], direction)
         f = fermi_dirac(e, mu, T)
-        M = c.conj().T @ dH @ c
-        Sd = c.conj().T @ dS @ c
-        M = M - 0.5 * (e[:, None] + e[None, :]) * Sd
-        Xt = _dipole_term(model, c, e, direction)
-        if Xt is not None:
-            M = M + Xt
-        dE = e[None, :] - e[:, None]          # E_m - E_n
-        df = f[:, None] - f[None, :]          # f_n - f_m
-        A2 = np.abs(M) ** 2
+        dE = e[:, None, :] - e[:, :, None]          # E_m - E_n
+        df = f[:, :, None] - f[:, None, :]          # f_n - f_m
         mask = dE > 1e-3
+        dEm = dE[mask]
+        W = (np.broadcast_to(w[:, None, None], dE.shape)[mask]
+             * df[mask] * np.abs(M[mask]) ** 2 / dEm)
         for iw, hw in enumerate(omega):
             if lineshape == "gaussian":
-                g = np.exp(-0.5 * ((dE - hw) / eta) ** 2) \
+                g = np.exp(-0.5 * ((dEm - hw) / eta) ** 2) \
                     / (eta * np.sqrt(2.0 * np.pi))
-            elif lineshape == "lorentzian":
-                g = (eta / np.pi) / ((dE - hw) ** 2 + eta ** 2)
             else:
-                raise ValueError("lineshape must be gaussian or lorentzian")
-            sig[iw] += w * (df * A2 * g / np.where(mask, dE, 1.0))[mask].sum()
+                g = (eta / np.pi) / ((dEm - hw) ** 2 + eta ** 2)
+            sig[iw] += float(W @ g)
     # sigma / (e^2 / 4 hbar) = spin * 4 pi / area * sum, M in eV*A, dE in eV
     return sig * spin * 4.0 * np.pi / area
 
@@ -160,6 +171,14 @@ def sigma_tensor(model: TightBindingModel, omega: ArrayLike, mu: float,
     is allowed (eta regularizes).  The intraband (Drude) part is *not*
     included; combine with :func:`drude_weight` for metals.
 
+    For a != b, do not pass a grid folded by time reversal
+    (``monkhorst_pack(..., time_reversal=True)``): the fold keeps one of
+    each pair k, -k, whose Hall integrands are complex conjugates of
+    each other, so the imaginary parts that cancel on the full grid are
+    doubled instead.  Gapped graphene (``haldane(t2=0.0, m_ab=0.3)``,
+    mesh 30) gives sigma_xy(0) = -0.912 on the folded grid and 0 on the
+    full one.  The diagonal components (a == b) fold exactly.
+
     Anchor (TKNN; Thouless, Kohmoto, Nightingale and den Nijs, Phys.
     Rev. Lett. 49, 405 (1982)): for a Chern insulator at T -> 0 with mu
     in the gap, sigma_xy(0) = C e^2/h = (2 C / pi) in these units, with
@@ -184,32 +203,19 @@ def sigma_tensor(model: TightBindingModel, omega: ArrayLike, mu: float,
             raise ValueError("periodic model: give mesh or kpts")
         kpts, weights, area = [None], [1.0], 1.0
     sig = np.zeros(len(omega), dtype=complex)
-    for k, w in zip(kpts, weights):
-        H, S = model.bloch(k)
-        dHa, dSa = model.bloch_derivative(k, a)
-        e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
-        Ma = c.conj().T @ dHa @ c \
-            - 0.5 * (e[:, None] + e[None, :]) * (c.conj().T @ dSa @ c)
-        Xa = _dipole_term(model, c, e, a)
-        if Xa is not None:
-            Ma = Ma + Xa
-        if b == a:
-            Mb = Ma
-        else:
-            dHb, dSb = model.bloch_derivative(k, b)
-            Mb = c.conj().T @ dHb @ c \
-                - 0.5 * (e[:, None] + e[None, :]) * (c.conj().T @ dSb @ c)
-            Xb = _dipole_term(model, c, e, b)
-            if Xb is not None:
-                Mb = Mb + Xb
+    dirs = (a,) if b == a else (a, b)
+    for w, e, c, der in _eig_chunks(model, kpts, weights, thresh=thresh,
+                                    vectors=True, directions=dirs):
+        Ma = _velocity(model, e, c, der[a], a)
+        Mb = Ma if b == a else _velocity(model, e, c, der[b], b)
         f = fermi_dirac(e, mu, T)
-        dE = e[None, :] - e[:, None]          # E_m - E_n
-        df = f[:, None] - f[None, :]          # f_n - f_m
-        num = df * Ma * Mb.T                  # (f_n - f_m) M^a_nm M^b_mn
-        mask = np.abs(dE) > 1e-9              # strictly interband
+        dE = e[:, None, :] - e[:, :, None]          # E_m - E_n
+        df = f[:, :, None] - f[:, None, :]          # f_n - f_m
+        num = (w[:, None, None] * df) * Ma * np.swapaxes(Mb, 1, 2)
+        mask = np.abs(dE) > 1e-9                    # strictly interband
+        num, dEm = num[mask], dE[mask]
         for iw, hw in enumerate(omega):
-            den = dE * (dE - hw - 1j * eta)
-            sig[iw] += w * (num[mask] / den[mask]).sum()
+            sig[iw] += (num / (dEm * (dEm - hw - 1j * eta))).sum()
     return sig * (-4j) * spin / area
 
 
@@ -232,10 +238,8 @@ def carrier_count(model: TightBindingModel, mu: float,
     else:
         kpts, weights = check_kgrid(kpts, weights)
     n = 0.0
-    for k, w in zip(kpts, weights):
-        H, S = model.bloch(k)
-        e = gen_eigh(H, S, thresh=thresh)
-        n += w * spin * float(fermi_dirac(e, mu, T).sum())
+    for w, e, _, _ in _eig_chunks(model, kpts, weights, thresh=thresh):
+        n += spin * float(w @ fermi_dirac(e, mu, T).sum(axis=1))
     return n
 
 
@@ -244,25 +248,40 @@ def drude_weight(model: TightBindingModel, mu: float,
                  kpts: Optional[ArrayLike] = None,
                  weights: Optional[ArrayLike] = None, T: float = 300.0,
                  direction: int = 0, spin: float = 2,
-                 thresh: float = 1e-10) -> float:
+                 thresh: float = 1e-10, degen_tol: float = 1e-9) -> float:
     """Intraband (Drude) weight, in units of e^2/(4 hbar) times eV.
 
     Defined so that the intraband part of the conductivity, in the same
     units as :func:`sigma_optical`, is sigma_intra(hw) = D delta(hw):
 
-        D = spin * (4 pi / A) * sum_k w_k sum_n |M_nn|^2 (-df/de)|_{e_n},
+        D = spin * (4 pi / A) * sum_k w_k sum_{n, m: e_n = e_m}
+            |M_nm|^2 (-df/de)|_{e_n},
 
-    with the same nonorthogonal velocity M_nn = <n| dH/dk - e_n dS/dk |n>
-    as the interband formula, so D shares its exact invariance under a
-    shift of the energy zero.  D vanishes for a filled or empty band and
-    is pinned in the tests to the closed form of the half-filled chain,
-    D = 8 spin |t| a  (from (4 pi / a) (a / 2 pi) * integral dk
-    v(k)^2 delta(E(k)) with v = -2 t a sin ka).
+    with the same nonorthogonal velocity M_nm = <n| dH/dk - (e_n + e_m)/2
+    dS/dk |m> as the interband formula, so D shares its exact
+    invariance under a shift of the energy zero.  The sum runs over the
+    pairs of states with equal energy (|e_n - e_m| <= ``degen_tol``,
+    eV): the diagonal n = m and, where bands are degenerate at a
+    k-point, the pairs inside the degenerate set (the zero-frequency
+    limit (f_n - f_m)/(e_m - e_n) -> -df/de of the Kubo formula).  Away
+    from degeneracies only n = m contributes.  D vanishes for a filled
+    or empty band and is pinned in the tests to the closed form of the
+    half-filled chain, D = 8 spin |t| a  (from (4 pi / a) (a / 2 pi) *
+    integral dk v(k)^2 delta(E(k)) with v = -2 t a sin ka).
+
+    Before 0.13.0 only n = m was summed.  At a k-point where two bands
+    are degenerate (a Dirac point on the mesh, for example) that
+    depended on which eigenvectors the solver returned inside the
+    degenerate set, and graphene at mu = 0 on a mesh through K came out
+    anisotropic (D_xx and D_yy 7 % apart, where the hexagonal symmetry
+    makes them equal).
 
     T must be > 0: the factor -df/de is sampled on the k-points, so it
     needs thermal smearing (T = 0 is refused).
     """
     _check_T(T, strict=True)
+    if not degen_tol >= 0:
+        raise ValueError("degen_tol (eV) must be >= 0")
     if mesh is not None:
         kpts, weights = model.monkhorst_pack(mesh)
         area = model.cell_volume
@@ -274,13 +293,17 @@ def drude_weight(model: TightBindingModel, mu: float,
             raise ValueError("periodic model: give mesh or kpts")
         kpts, weights, area = [None], [1.0], 1.0
     D = 0.0
-    for k, w in zip(kpts, weights):
-        H, S = model.bloch(k)
-        dH, dS = model.bloch_derivative(k, direction)
-        e, c = gen_eigh(H, S, thresh=thresh, eigvals_only=False)
+    for w, e, c, der in _eig_chunks(model, kpts, weights, thresh=thresh,
+                                    vectors=True, directions=(direction,)):
+        V = _velocity(model, e, c, der[direction], direction)
         x = np.clip((e - mu) / (KB * T), -60.0, 60.0)
         mdfde = 1.0 / (4.0 * KB * T * np.cosh(0.5 * x) ** 2)
-        v_nn = np.real(np.einsum("in,ij,jn->n", c.conj(), dH, c)
-                       - e * np.einsum("in,ij,jn->n", c.conj(), dS, c))
-        D += w * float((v_nn ** 2 * mdfde).sum())
+        v_nn = np.real(np.diagonal(V, axis1=1, axis2=2))
+        D += float(w @ (v_nn ** 2 * mdfde).sum(axis=1))
+        nb = e.shape[1]
+        pair = np.abs(e[:, :, None] - e[:, None, :]) <= degen_tol
+        pair &= ~np.eye(nb, dtype=bool)[None]
+        if np.any(pair):                  # degenerate sets at some k
+            extra = (np.abs(V) ** 2 * mdfde[:, :, None]) * pair
+            D += float(w @ extra.sum(axis=(1, 2)))
     return D * spin * 4.0 * np.pi / area

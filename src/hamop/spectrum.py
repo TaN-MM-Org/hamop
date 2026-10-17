@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence, Tuple, Union
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .eigsolve import gen_eigh
+from .eigsolve import _eig_chunks
 from .model import KB, check_kgrid, fermi_dirac
 
 if TYPE_CHECKING:
@@ -22,10 +22,19 @@ __all__ = ["bands", "dos", "fermi_level", "band_edges", "k_path"]
 
 
 def _eigs(model, kpts, thresh):
+    """Eigenvalues at every k-point, shape (nk, nao).  Since 0.13.0 the
+    Bloch matrices are assembled and diagonalized a block of k-points at
+    a time (`hamop.eigsolve._eig_chunks`), which gives the same
+    eigenvalues as the former one-k-point loop to rounding (1e-12 in the
+    tests) and is many times faster for small cells."""
+    if not isinstance(kpts, np.ndarray):
+        kpts = list(kpts)
+    if len(kpts) == 0:
+        return np.array([])
     out = []
-    for k in kpts:
-        H, S = model.bloch(k)
-        out.append(gen_eigh(H, S, thresh=thresh))
+    for _, e, _, _ in _eig_chunks(model, kpts, np.ones(len(kpts)),
+                                  thresh=thresh):
+        out.extend(e)
     return np.array(out)
 
 
@@ -50,14 +59,18 @@ def dos(model: TightBindingModel, energies: ArrayLike,
     if not eta > 0:
         raise ValueError("eta (the Gaussian width, eV) must be > 0")
     kpts, weights = _grid(model, mesh, kpts, weights)
-    rho = np.zeros_like(np.asarray(energies, dtype=float))
-    for k, w in zip(kpts, weights):
-        H, S = model.bloch(k)
-        e = gen_eigh(H, S, thresh=thresh)
-        for ei in e:
-            rho += w * np.exp(-0.5 * ((energies - ei) / eta) ** 2) \
-                / (eta * np.sqrt(2.0 * np.pi))
-    return rho
+    E = np.asarray(energies, dtype=float)
+    Ef = E.reshape(-1)
+    rho = np.zeros(Ef.shape)
+    piece = max(1, (1 << 22) // max(1, Ef.size))
+    norm = 1.0 / (eta * np.sqrt(2.0 * np.pi))
+    for w, e, _, _ in _eig_chunks(model, kpts, weights, thresh=thresh):
+        ev = e.ravel()
+        wv = np.repeat(w, e.shape[1])
+        for s in range(0, ev.size, piece):
+            x = (Ef[:, None] - ev[None, s:s + piece]) / eta
+            rho += np.exp(-0.5 * x * x) @ wv[s:s + piece]
+    return (rho * norm).reshape(E.shape)
 
 
 def fermi_level(model: TightBindingModel, filling: float,

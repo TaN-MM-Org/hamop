@@ -36,13 +36,14 @@ from .spin import PAULI, kane_mele, with_spin
 from .symmetry import find_point_group, symmetry_fold
 from .wannier import (from_wannier90, from_wannier90_tb, load_wannier90_hr,
                       load_wannier90_tb, save_wannier90_hr)
-from .lab import (BandFit, band_information, design_kpoints,
-                  fit_bands, propagate_uncertainty,
+from .lab import (BandFit, band_information, compare_models,
+                  design_kpoints, fit_bands, propagate_uncertainty,
                   sheet_conductivity_from_transmittance, sheet_optics)
+from .carriers import carrier_density, chemical_potential_from_density
 from .geometry import (quantum_geometric_tensor, quantum_metric,
                        quantum_weight)
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
@@ -66,6 +67,7 @@ __all__ = [
     "from_wannier90_tb", "load_wannier90_tb",
     "BandFit", "fit_bands", "band_information", "design_kpoints",
     "propagate_uncertainty", "sheet_optics",
-    "sheet_conductivity_from_transmittance",
+    "sheet_conductivity_from_transmittance", "compare_models",
+    "carrier_density", "chemical_potential_from_density",
     "quantum_geometric_tensor", "quantum_metric", "quantum_weight",
 ]

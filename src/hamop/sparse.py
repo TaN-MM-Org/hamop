@@ -225,6 +225,25 @@ def _spectral_bounds(H, S=None):
     return float(e_lo), float(e_hi)
 
 
+def _check_moments(mu, mu0, exact):
+    """Refuse moments that grow beyond their bound.  With the rescaled
+    spectrum inside [-1, 1] every Chebyshev moment obeys |mu_m| <= mu_0
+    for the exact trace (|T_m(x)| <= 1 there); a spectrum that leaks
+    outside the scaling window makes them grow exponentially with m and
+    the series returns garbage (a 200-site chain with bounds (-1.9, 1.9)
+    gave a DOS of -4.7e7 before 0.13.0).  The stochastic trace and the
+    nonorthogonal recurrence are bounded less tightly, so a factor 10 is
+    allowed there; real leaks exceed it by many orders of magnitude."""
+    limit = (1.0 + 1e-6) * abs(mu0) if exact else 10.0 * abs(mu0)
+    worst = float(np.max(np.abs(mu)))
+    if not np.isfinite(worst) or worst > limit:
+        raise ValueError(
+            "the Chebyshev moments grow beyond their bound (max |mu_m| = "
+            f"{worst:.3g}, mu_0 = {mu0:.3g}): the spectrum is not inside "
+            "the energy window; widen `bounds` (or omit it to have the "
+            "extreme eigenvalues found by Lanczos)")
+
+
 def _jackson(M):
     """Jackson kernel damping factors g_0 .. g_{M-1} (Weisse et al.,
     Rev. Mod. Phys. 78, 275 (2006), Eq. (71))."""
@@ -252,7 +271,8 @@ def kpm_dos(model: TightBindingModel, energies: ArrayLike,
     bounds: optional (E_min, E_max) enclosing the whole spectrum; by
     default the extreme eigenvalues are found with two Lanczos runs and
     widened by ``margin`` of the span (moments diverge if the true
-    spectrum leaks outside the scaling window).
+    spectrum leaks outside the scaling window; since 0.13.0 that is
+    detected from the moments and refused).
 
     The energy resolution is roughly pi * span / (2 n_moments); finer
     structure than that is smoothed, exactly like a broadened
@@ -299,15 +319,37 @@ def kpm_dos(model: TightBindingModel, energies: ArrayLike,
         V0 = V0.astype(H.dtype)
         norm = 1.0 / int(n_random)
     mu = np.zeros(M)
+    if n_random is None:
+        # exact trace: V0 is the identity, so <V0|v> is the trace of v
+        # (since 0.13.0; summing all n^2 entries of V0* v cost a full
+        # extra pass over the n x n block per moment)
+        def project(v):
+            return float(np.real(np.trace(v)))
+    else:
+        V0c = V0.conj()
+
+        def project(v):
+            return float(np.real(np.sum(V0c * v)))
     v_prev = V0
     v_cur = (applyB(V0) - b * V0) / a
-    mu[0] = norm * float(np.real(np.sum(V0.conj() * v_prev)))
+    mu[0] = norm * project(v_prev)
     if M > 1:
-        mu[1] = norm * float(np.real(np.sum(V0.conj() * v_cur)))
+        mu[1] = norm * project(v_cur)
+    tmp = np.empty_like(v_cur)
     for m in range(2, M):
-        v_next = 2.0 * (applyB(v_cur) - b * v_cur) / a - v_prev
-        mu[m] = norm * float(np.real(np.sum(V0.conj() * v_next)))
+        # v_next = 2 (B v_cur - b v_cur) / a - v_prev, evaluated in place
+        # with the same operations in the same order as before 0.13.0
+        v_next = np.asarray(applyB(v_cur))
+        if v_next.dtype != v_cur.dtype:
+            v_next = v_next.astype(np.result_type(v_next, v_cur))
+        np.multiply(v_cur, b, out=tmp)
+        v_next -= tmp
+        v_next *= 2.0
+        v_next /= a
+        v_next -= v_prev
+        mu[m] = norm * project(v_next)
         v_prev, v_cur = v_cur, v_next
+    _check_moments(mu, mu[0], exact=(n_random is None and S is None))
     g = _jackson(M)
     x = (energies - b) / a
     inside = np.abs(x) < 1.0
@@ -343,7 +385,8 @@ def kpm_sigma(model: TightBindingModel, omega: ArrayLike, mu: float,
 
     integrated on ``n_energy`` points.  The broadening is set by the
     Jackson kernel (resolution ~ pi * span / n_moments), not by an eta
-    parameter.  n_random as in :func:`kpm_dos` (None = exact trace).
+    parameter.  n_random and bounds as in :func:`kpm_dos` (None = exact
+    trace; bounds that do not enclose the spectrum are refused).
 
     Anchored in the tests on the two-site molecule, whose *integrated*
     peak weight has the kernel-independent closed form
@@ -375,6 +418,7 @@ def kpm_sigma(model: TightBindingModel, omega: ArrayLike, mu: float,
     a = 0.5 * span * (1.0 + margin)
     b = 0.5 * float(e_hi + e_lo)
     mu_mn = np.real(_vv_moments(H, v, v, a, b, M, n, n_random, seed))
+    _check_moments(mu_mn, mu_mn[0, 0], exact=n_random is None)
     g = _jackson(M)
     pref = (2.0 - (np.arange(M) == 0)) * g
     mu_t = mu_mn * pref[:, None] * pref[None, :]

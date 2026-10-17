@@ -39,9 +39,21 @@ def principal_layers(model: TightBindingModel, layer_width: float,
     if model.cell is not None:
         raise ValueError("principal_layers takes a finite model "
                          "(cell=None); build a finite device supercell")
+    width = float(layer_width)
+    if not (np.isfinite(width) and width > 0.0):
+        raise ValueError("layer_width must be a finite length > 0")
     x = model.positions[:, axis]
     x0 = float(x.min())
-    layer_of = np.floor((x - x0) / float(layer_width)).astype(int)
+    # A site that sits on a layer boundary (x - x0 an exact multiple of
+    # the width, as in a chain of spacing a cut with width a) belongs to
+    # the layer that starts there.  Floating-point division can land just
+    # below the integer (3 * 1.42 / 1.42 = 2.9999999999999996), which
+    # before 0.13.0 put such a site one layer too low and then refused
+    # the valid partition ("layers 14 and 16 couple") or made layers of
+    # unequal size; positions within 1e-9 layer widths below a boundary
+    # are therefore counted on it.
+    q = (x - x0) / width
+    layer_of = np.floor(q + 1e-9 * np.maximum(1.0, q)).astype(int)
     n_layers = int(layer_of.max()) + 1
     if n_layers < 2:
         raise ValueError("fewer than two layers; reduce layer_width")

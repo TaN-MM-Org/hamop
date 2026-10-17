@@ -43,6 +43,13 @@ numbers a lab reports:
    sheet whose sheet conductivity the Kubo functions give, and the
    inverse, Re sigma from a measured transmittance relative to the
    bare substrate.
+
+New in 0.13.0:
+
+6. `compare_models`: does the measurement need a richer model (a
+   second-neighbor hopping, say)?  The likelihood-ratio (chi-squared)
+   test with measurement errors, the F test without them, for two
+   nested parameterizations fitted to the same data.
 """
 from __future__ import annotations
 
@@ -53,13 +60,14 @@ import numpy as np
 from numpy.typing import ArrayLike
 from scipy.optimize import least_squares
 from scipy.stats import chi2 as _chi2_dist
+from scipy.stats import f as _f_dist
 
 from .model import ALPHA
 from .spectrum import bands
 
 __all__ = ["BandFit", "fit_bands", "band_information",
            "design_kpoints", "propagate_uncertainty", "sheet_optics",
-           "sheet_conductivity_from_transmittance"]
+           "sheet_conductivity_from_transmittance", "compare_models"]
 
 _COND_MAX = 1e10
 _SINGULAR_MSG = ("these (k-point, band) observations cannot tell the "
@@ -203,6 +211,13 @@ def fit_bands(build: Callable[[np.ndarray], Any], theta0: ArrayLike,
     Returns a `BandFit`. Refuses non-identifiable designs and too few
     points, with an explanation.
     """
+    return _fit(build, theta0, kpts, energies, band_index, sigmas,
+                ls_kwargs)[0]
+
+
+def _fit(build, theta0, kpts, energies, band_index, sigmas, ls_kwargs):
+    """`fit_bands`, also returning the residual sum of squares (weighted
+    by 1/sigma^2 when sigmas are given) and the checked inputs."""
     x0, k, bidx, sig, y = _check(build, theta0, kpts, band_index,
                                  sigmas, energies)
     n, p = k.shape[0], x0.size
@@ -233,9 +248,10 @@ def fit_bands(build: Callable[[np.ndarray], Any], theta0: ArrayLike,
         chi2 = chi2_dof = None
     else:
         chi2, chi2_dof = rss, n - p
-    return BandFit(theta=res.x.copy(), sigma=np.sqrt(np.diag(cov)),
-                   cov=cov, chi2=chi2, chi2_dof=chi2_dof, n_points=n,
-                   condition_number=cond)
+    fit = BandFit(theta=res.x.copy(), sigma=np.sqrt(np.diag(cov)),
+                  cov=cov, chi2=chi2, chi2_dof=chi2_dof, n_points=n,
+                  condition_number=cond)
+    return fit, rss, (k, bidx, sig, y)
 
 
 def band_information(build: Callable[[np.ndarray], Any], theta: ArrayLike,
@@ -316,6 +332,140 @@ def design_kpoints(build: Callable[[np.ndarray], Any], theta: ArrayLike,
     sigma = np.sqrt(np.diag(cov)) if ok else None
     return {"indices": list(chosen), "fisher": fisher,
             "condition_number": cond, "sigma": sigma}
+
+
+# ---------------- does the data need the extra parameter? (0.13.0) ----
+
+def compare_models(build_simple: Callable[[np.ndarray], Any],
+                   theta0_simple: ArrayLike,
+                   build_extended: Callable[[np.ndarray], Any],
+                   theta0_extended: Optional[ArrayLike],
+                   kpts: ArrayLike, energies: ArrayLike,
+                   band_index: Union[int, ArrayLike] = 0,
+                   sigmas: Optional[ArrayLike] = None,
+                   embed: Optional[Callable[[np.ndarray], Any]] = None,
+                   nested_tol: float = 1e-8,
+                   **ls_kwargs: Any) -> Dict[str, Any]:
+    """Test whether measured band energies need a richer model.
+
+    Fits the same measurement twice with `fit_bands`: with a simple
+    model and with an extended model that contains it (for example the
+    chain with and without a second-neighbor hopping), and asks whether
+    the improvement of the extended fit is larger than noise alone
+    would give.
+
+    build_simple, theta0_simple : the simple parameterization and its
+        starting point.
+    build_extended, theta0_extended : the extended one.  theta0_extended
+        may be None when ``embed`` is given; the extended fit then starts
+        from embed(simple fit), which guarantees that it cannot end worse.
+    embed : optional callable theta_simple -> theta_extended that places
+        the simple model inside the extended one (e.g. lambda th:
+        [th[0], th[1], 0.0]).  When given, the nesting is verified: the
+        extended model at embed(theta) must reproduce the simple model's
+        energies at every measured point to ``nested_tol`` (relative to
+        the largest energy), or the comparison is refused.
+    kpts, energies, band_index, sigmas : the measurement, as in
+        `fit_bands`.
+
+    With measurement errors (``sigmas``) the statistic is the drop in
+    chi-squared, Delta chi2 = chi2_simple - chi2_extended, compared with
+    the chi-squared distribution with Delta p (the number of extra
+    parameters) degrees of freedom: the likelihood-ratio test, whose
+    statistic -2 log(likelihood ratio) is Delta chi2 for Gaussian errors
+    (S. S. Wilks, Ann. Math. Statist. 9, 60 (1938)).  Without
+    ``sigmas`` the scale of the errors is unknown and the F statistic
+    F = [(RSS_simple - RSS_extended) / Delta p] / [RSS_extended /
+    (n - p_extended)] is compared with the F distribution with
+    (Delta p, n - p_extended) degrees of freedom (the extra sum of
+    squares test of linear regression).  Both are exact when the band
+    energies are linear in the parameters (the tests check this against
+    an independent least-squares calculation and against simulated
+    experiments); otherwise they hold for small errors (Wilks).  They
+    assume independent Gaussian errors and an extended parameter whose
+    "simple" value lies inside its allowed range, not on its edge.
+
+    A small ``p_value`` (say below 0.01) means the extra parameters
+    describe structure in the data that noise does not explain; a large
+    one means the data cannot tell the models apart, and the simple one
+    suffices.
+
+    Returns dict(simple, extended (the two BandFit results), test ("chi2"
+    or "F"), statistic, dof (Delta p, or (Delta p, n - p_extended) for
+    "F"), p_value, nested_checked (True when ``embed`` verified the
+    nesting)).
+
+    Refused: an extended model without more parameters than the simple
+    one; no degrees of freedom left; an ``embed`` that does not
+    reproduce the simple model; an extended fit that ends with a larger
+    residual than the simple one (then the models are not nested, or
+    the extended fit stopped in another minimum: give ``embed``); and,
+    for the F test, an extended fit with zero residual.
+    """
+    fs, rss_s, (k, bidx, sig, y) = _fit(build_simple, theta0_simple, kpts,
+                                         energies, band_index, sigmas,
+                                         ls_kwargs)
+    nested_checked = False
+    if embed is not None:
+        if not callable(embed):
+            raise ValueError("embed must be a callable theta_simple -> "
+                             "theta_extended")
+        start = np.asarray(embed(fs.theta.copy()), dtype=float).ravel()
+        if theta0_extended is not None and \
+                np.asarray(theta0_extended).size != start.size:
+            raise ValueError("embed returns a parameter vector of a "
+                             "different length than theta0_extended")
+        e_s = _model(build_simple, fs.theta, k, bidx)
+        e_e = _model(build_extended, start, k, bidx)
+        dev = float(np.abs(e_e - e_s).max())
+        scale = max(1.0, float(np.abs(e_s).max()))
+        if dev > nested_tol * scale:
+            raise ValueError(
+                "embed does not place the simple model inside the extended "
+                f"one: at the measured points their energies differ by "
+                f"{dev:.3g} (nested_tol = {nested_tol:g} relative); the "
+                "comparison needs nested models")
+        nested_checked = True
+        if theta0_extended is None:
+            theta0_extended = start
+    elif theta0_extended is None:
+        raise ValueError("give theta0_extended, or embed to start the "
+                         "extended fit from the simple one")
+    p_s = fs.theta.size
+    p_e = np.asarray(theta0_extended, dtype=float).size
+    n = k.shape[0]
+    if not p_e > p_s:
+        raise ValueError(f"the extended model has {p_e} parameters, not "
+                         f"more than the simple model's {p_s}")
+    if not n > p_e:
+        raise ValueError(f"{n} observations leave no degrees of freedom "
+                         f"for a {p_e}-parameter model")
+    fe, rss_e, _ = _fit(build_extended, theta0_extended, kpts, energies,
+                        band_index, sigmas, ls_kwargs)
+    if rss_e > rss_s * (1.0 + 1e-8) + 1e-300:
+        raise ValueError(
+            "the extended fit ends with a larger residual than the simple "
+            f"one ({rss_e:.6g} > {rss_s:.6g}): the models are not nested, "
+            "or the extended fit stopped in another minimum; pass embed "
+            "(and theta0_extended=None) to start it from the simple fit")
+    dp = p_e - p_s
+    drop = max(rss_s - rss_e, 0.0)
+    if sig is not None:
+        stat = drop
+        p_value = float(_chi2_dist.sf(stat, dp))
+        test, dof = "chi2", dp
+    else:
+        dof2 = n - p_e
+        if not rss_e > 0.0:
+            raise ValueError("the extended model fits the data exactly, so "
+                             "the F test has no scatter to compare with; "
+                             "give sigmas")
+        stat = (drop / dp) / (rss_e / dof2)
+        p_value = float(_f_dist.sf(stat, dp, dof2))
+        test, dof = "F", (dp, dof2)
+    return {"simple": fs, "extended": fe, "test": test,
+            "statistic": float(stat), "dof": dof, "p_value": p_value,
+            "nested_checked": nested_checked}
 
 
 # ---------------- error bars of derived quantities (new in 0.12.0) ----
