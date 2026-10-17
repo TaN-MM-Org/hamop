@@ -5,6 +5,157 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## 0.13.0 (2026-10-17)
+
+Two tools for a lab's own data, two bugs fixed, the k-point loops made
+many times faster, and two tutorials. No public function was removed or
+renamed; results of valid calls are unchanged except where a bug is
+fixed below (and by floating-point rounding, at most 1e-12 relative,
+where sums are now taken in a different order).
+
+### Added
+
+- `carrier_density(model, mu, n_neutral, ...)` and
+  `chemical_potential_from_density(model, density, n_neutral,
+  density_err=None, ...)` (new module `hamop.carriers`): the net carrier
+  density per cm^dim at a chemical potential, counted from a stated
+  neutral filling, and the inverse, with the interval that the
+  density's error maps to (solved exactly at density -/+ error),
+  `dn/dmu` and the quantum capacitance `e^2 dn/dmu` in F/cm^dim.
+  Refused: finite models, densities the bands cannot hold, `T <= 0` in
+  the inverse, and a k-mesh too coarse for the temperature (one state
+  carrying more than 5 % of `dn/dmu`). Tests: the chain against the
+  exact integral of its density of states by adaptive quadrature
+  (1e-9, five chemical potentials); graphene against its closed-form
+  dispersion summed on the same grid (1e-10) and electron-hole symmetry
+  (1e-10); the inverse (mu to 1e-9; interval ends reproduce the density
+  -/+ error to 1e-6 of the error); `dn/dmu` against a finite difference
+  (1e-6) and the chain's closed form (1e-3); graphene at 0.2 and 0.4 eV
+  against the Dirac-cone density (quadrature at 300 K) and the
+  Dirac-cone quantum capacitance `2 e^2 mu / (pi (hbar v_F)^2)` (graphene's
+  quantum capacitance was measured by J. Xia, F. Chen, J. Li and N. Tao,
+  Nature Nanotechnology 4, 505 (2009)), within 1 % (the
+  lattice deviates from the cone by 0.1 % and 0.4 %).
+- `hamop.model.E_CHARGE = 1.602176634e-19` C, exact in the SI (CODATA
+  2018); the test suite checks it against `scipy.constants.e`.
+- `compare_models(build_simple, theta0_simple, build_extended,
+  theta0_extended, kpts, energies, ..., embed=None)` (module
+  `hamop.lab`): fits nested models to the same band energies and tests
+  whether the extra parameters are needed, by the likelihood-ratio
+  test (Delta chi-squared against chi-squared(Delta p); S. S. Wilks,
+  Ann. Math. Statist. 9, 60 (1938)) with measurement errors, or by the
+  F test of linear regression without them. `embed` verifies the
+  nesting and starts the extended fit from the simple one. Refused:
+  no extra parameters, no degrees of freedom, an `embed` that does not
+  reproduce the simple model, and an extended fit that ends worse.
+  Tests: both statistics against least-squares closed forms computed
+  with `numpy.linalg.lstsq` (1e-6) and the p-values against the
+  chi-squared and F tails (1e-6); 60 seeded experiments under the
+  simple model (mean statistic 1.25, within 0.45 of 1; p < 0.1 in 11 of
+  60, allowed 1 to 13); power against a real `t2 = 0.1 eV`
+  (p < 1e-10).
+- `drude_weight(..., degen_tol=1e-9)`: the energy window (eV) within
+  which two states count as degenerate (see Fixed).
+
+### Fixed
+
+- `drude_weight` summed |M_nn|^2 over the diagonal only. At a k-point
+  where two bands are degenerate that diagonal depends on the
+  eigenvectors the solver happens to return inside the degenerate
+  pair. Graphene (t = -2.7 eV, a = 2.46 Angstrom, mu = 0, 300 K): with
+  only the Dirac point K as k-point, D was 3068.84 along x and 0.0
+  along y (the eigenvector-free value is 3068.84 for both); on a
+  30 x 30 mesh through K and K', D_xx = 3.5382 and D_yy = 3.2815, 7 %
+  apart where the hexagonal symmetry makes them equal. The sum now runs
+  over all pairs with |e_n - e_m| <= `degen_tol`, the zero-frequency
+  limit (f_n - f_m)/(e_m - e_n) -> -df/de of the Kubo formula, which is
+  basis independent: 3068.84 in both directions, and D_xx = D_yy =
+  6.8196 on the mesh. Without degeneracies the result is unchanged
+  (1e-12). Tests:
+  `test_drude_weight_at_a_degenerate_k_point_is_basis_independent`,
+  `test_drude_weight_away_from_degeneracies_is_unchanged`.
+- `principal_layers` assigned sites to layers with
+  floor((x - x0) / width), which falls one layer short when the
+  division lands just below an integer (15 * 1.42 / 1.42 =
+  14.999999999999998). A 40-site chain of spacing 1.42 Angstrom cut
+  with width 1.42: before ValueError ("layers 14 and 16 couple"), now
+  40 one-site layers and the impurity chain's closed-form transmission
+  to 1e-5; with width 2.84: before layers of 3 and 1 sites, now twenty
+  of 2. Positions within 1e-9 layer widths below a boundary count on
+  it. Test: `test_principal_layers_with_a_non_integer_spacing`.
+
+### Changed
+
+- `kpm_dos` and `kpm_sigma` check their Chebyshev moments against the
+  bound |mu_m| <= mu_0 that holds when the spectrum lies inside the
+  energy window (a factor 10 is allowed for the stochastic trace and
+  the nonorthogonal recurrence) and refuse `bounds` that cut the
+  spectrum. Before: a 200-site chain with bounds (-1.9, 1.9) gave a DOS
+  of -4.7e7 at E = -1 eV, and with (-1, 1) 5e52. Test:
+  `test_kpm_refuses_bounds_that_cut_the_spectrum`.
+- `principal_layers` refuses a layer width that is not a finite
+  positive length (before: division by zero).
+- Documentation: `sigma_tensor` and `monkhorst_pack` now state that a
+  grid folded by time reversal is not valid for the Hall component
+  (a != b). The fold keeps one of k and -k, whose Hall integrands are
+  complex conjugates, so their imaginary parts double instead of
+  cancelling: gapped graphene (`haldane(t2=0.0, m_ab=0.3)`, mesh 30)
+  gives sigma_xy(0) = -0.912 on the folded grid and 0 on the full grid.
+  This is a documentation change; a grid passed as `kpts` cannot be
+  recognized as folded.
+- Type hints on the new and changed functions.
+
+### Performance
+
+- New private helpers `TightBindingModel._bloch_many` and
+  `hamop.eigsolve._eig_chunks` assemble and diagonalize H(k), S(k) and
+  their k-derivatives for blocks of k-points with NumPy array
+  operations; where canonical orthogonalization drops overlap
+  directions the block falls back to `gen_eigh` one k-point at a time.
+  `bands`, `dos`, `fermi_level`, `band_edges`, `carrier_count`,
+  `sigma_optical`, `sigma_tensor` and `drude_weight` use them. Measured
+  speedups (one thread, median of 5 runs, lower of two runs on a
+  shared 2-CPU machine): `sigma_optical` graphene mesh 120, two photon
+  energies, 140x (19.5 s to 0.14 s); `sigma_tensor` Haldane mesh 48,
+  270x; `dos` graphene mesh 100 at 200 energies, 26x; `bands` graphene
+  at 2000 k-points, 100x; `fermi_level` Kane-Mele mesh 60, 73x;
+  `carrier_count` graphene mesh 100, 110x; `drude_weight` overlap chain
+  mesh 800, 470x; `fit_bands` on README example 6, 2.5x. Equality is
+  checked in `tests/test_batched_kpoints.py` against the 0.12.1
+  per-k-point loops, kept there verbatim as the reference, to 1e-12
+  relative for six models (orthogonal, overlap, complex Haldane,
+  spinful, dipole blocks, and an overcomplete basis that exercises the
+  fallback); measured differences are 1e-14 or below.
+- `kpm_dos` evaluates its Chebyshev recurrence in place with the same
+  operations in the same order, and takes the exact trace as a trace:
+  2.5x faster for a 1000-site chain (19.3 s to 7.7 s; the
+  nonorthogonal case is dominated by the sparse solves and unchanged).
+  Same moments to 1e-15 (exact trace) and bit for bit (stochastic
+  trace); test `test_kpm_dos_in_place_recurrence_equals_the_old_one`.
+- The full test suite runs in about 110 to 150 s instead of 376 s on
+  the same machine, with 32 more tests.
+
+### Tutorials
+
+- `examples/tutorial_gated_graphene.py`: Hall readings of gated
+  graphene, averaged, turned into mu with an error interval and the
+  quantum capacitance, then into the optical conductivity and the
+  transmittance across the Pauli-blocking edge at 2 mu (about 3 s).
+- `examples/tutorial_band_fit_model_check.py`: a band fit that fails
+  its p-value, `compare_models` showing that a second-neighbor hopping
+  is needed, the extended fit, and error bars of unmeasured quantities
+  from both models (about 2 s).
+- Both outputs are quoted in the scripts and in the README;
+  `tests/test_tutorials.py` runs the scripts and checks every printed
+  number to the last digit.
+
+### Tests
+
+- 222 tests (190 before): new `tests/test_regressions_0130.py` (4),
+  `tests/test_batched_kpoints.py` (12 including parametrized cases),
+  `tests/test_carriers.py` (10), `tests/test_compare_models.py` (3) and
+  `tests/test_tutorials.py` (3). The new tests take about 35 s in all.
+
 ## 0.12.1 (2026-10-10)
 
 Citation correction and packaging.

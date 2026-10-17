@@ -22,7 +22,9 @@ computes:
   geometric quantities of the electron states;
 - for your own measurements: model parameters fitted to measured band
   energies with error bars, error bars for anything computed from
-  them, and the transmittance of a 2D sample that an optical
+  them, a test of whether the data need a richer model, the chemical
+  potential and quantum capacitance that a measured carrier density
+  implies, and the transmittance of a 2D sample that an optical
   measurement would see.
 
 The point of the package is that all of these come from the *same*
@@ -49,9 +51,12 @@ material come from your own calculation or measurement.
 - [A short guide to the words used here](#a-short-guide-to-the-words-used-here)
 - [Install, units and conventions](#install-units-and-conventions)
 - [Examples](#examples) (each with the output it prints)
+- [Tutorials](#tutorials) (two complete analyses, from data to a result
+  with error bars)
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
 - [How the results are checked](#how-the-results-are-checked)
+- [What changed in 0.13.0](#what-changed-in-0130)
 - [What changed in 0.12.0](#what-changed-in-0120)
 - [What changed in 0.11.0](#what-changed-in-0110)
 - [Bugs fixed in 0.10.1](#bugs-fixed-in-0101)
@@ -179,7 +184,7 @@ Units and conventions, stated once:
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with hamop 0.12.0. The model parameters are illustrative
+printed with hamop 0.13.0. The model parameters are illustrative
 values, not fitted to any material, unless the text says otherwise.
 
 ### 1. Graphene: bands and the absorption plateau
@@ -654,6 +659,65 @@ measured spectrum can be compared with `sigma_optical` point by point.
 The substrate index 1.5 and the measured value 0.9805 are illustrative
 numbers, not data for a real sample.
 
+## Tutorials
+
+Two scripts in `examples/` carry a complete analysis from data to a
+result with error bars. Each uses only `hamop`, makes its own synthetic
+"measured" data with a fixed seed (replace them with yours), runs in a
+few seconds and prints the result below. The test suite runs both and
+checks every printed number.
+
+### Gated graphene: from a Hall density to the absorption edge
+
+`examples/tutorial_gated_graphene.py` starts from eight Hall readings
+of the electron density of a gated graphene sheet. It averages them,
+turns the density into the chemical potential `mu` with
+`chemical_potential_from_density` (the interval comes from solving for
+the density minus and plus its error), reports the quantum capacitance,
+and computes the optical conductivity and the transmittance relative to
+the bare substrate around the Pauli-blocking edge at `2 mu`. Below the
+edge the transitions are blocked because their final states are
+already filled; above it the absorption returns to the universal value.
+The numbers in brackets are the conductivity at the two ends of the
+`mu` interval.
+
+```
+Hall density: n = (5.980 +/- 0.047) x 1e12 cm^-2
+chemical potential: mu = 0.2448 eV, interval [0.2438, 0.2458] eV
+Pauli-blocking edge: 2 mu = 0.490 +/- 0.002 eV
+quantum capacitance: 7.57 microfarad/cm^2
+photon (eV)  Re sigma / (e^2/4 hbar)   T/T_bare (substrate n = 1.5)
+   0.30      0.028 [0.027, 0.029]           0.9995
+   0.45      0.326 [0.318, 0.334]           0.9940
+   0.60      0.888 [0.884, 0.892]           0.9839
+   0.90      1.014 [1.014, 1.014]           0.9817
+```
+
+### Band fit with a model check
+
+`examples/tutorial_band_fit_model_check.py` fits 20 measured band
+energies of a chain. The nearest-neighbor model fails its p-value test.
+`compare_models` asks whether a second-neighbor hopping `t2` is needed
+and answers yes, with a p-value of 2e-53. The extended model fits well
+(p = 0.93) and recovers the true parameters within their error bars.
+The last lines show why the check matters: at `k = pi`, a point the
+measurement did not reach, the nearest-neighbor model predicts the band
+top 0.17 eV too low, about 14 times its own error bar, while the
+extended model is within its error bar of the truth.
+
+```
+step 1, nearest-neighbor fit: chi2 = 245.8 for 18 dof, p = 5.8e-42
+step 2, is t2 needed? Delta chi2 = 236.5 for 1 dof, p = 2.3e-53
+step 3, extended fit: chi2 = 9.3 for 17 dof, p = 0.93
+   t  = -0.9991 +/- 0.0049 eV   (truth -1)
+   e0 = +0.1966 +/- 0.0067 eV   (truth +0.2)
+   t2 = +0.0749 +/- 0.0049 eV   (truth +0.08)
+step 4, quantities not measured directly:
+   band width 4|t|      = 3.9962 +/- 0.0194 eV   (truth 4)
+   band top, k = pi     = 2.3446 +/- 0.0156 eV   (truth 2.36)
+   same, nearest-neighbor model only: 2.1886 +/- 0.0118 eV
+```
+
 ## What is in the package
 
 Each function's docstring (`help(hamop.sigma_optical)`, for example)
@@ -690,7 +754,9 @@ gives its inputs, units and conventions.
 - `sigma_tensor` -- the complex conductivity tensor component
   `sigma_ab(omega)` between bands, including the Hall component
   `sigma_xy`.
-- `drude_weight` -- the intraband (Drude) weight.
+- `drude_weight` -- the intraband (Drude) weight. Where bands are
+  degenerate at a k-point it sums over the degenerate pairs, so the
+  result does not depend on which eigenvectors the solver returns.
 - `carrier_count` -- occupied states per cell, spin included.
 
 **Topology and band geometry**
@@ -798,6 +864,29 @@ gives its inputs, units and conventions.
   not close to linear over one standard deviation) or by Monte Carlo
   sampling; and the chi-squared p-value of a fit, which says whether
   the data are consistent with the model and the stated errors.
+- `compare_models` (tutorial 2): fits the same data with a simple model
+  and with an extended model that contains it, and says whether the
+  extra parameters are needed. With measurement errors it uses the
+  likelihood-ratio (chi-squared) test (Wilks, Ann. Math. Statist. 9, 60
+  (1938)); without them, the F test of linear regression. Both are
+  exact when the band energies are linear in the parameters. An
+  optional `embed` function, which places the simple parameters inside
+  the extended model, lets it verify that the models are nested.
+
+**Carrier density and gating**
+
+- `carrier_density` -- the net density of added electrons (negative
+  for holes) at a chemical potential, per cm^2 for a 2D model (per cm
+  in 1D, per cm^3 in 3D), counted from a neutral filling you give.
+- `chemical_potential_from_density` (tutorial 1) -- the inverse: the
+  chemical potential that holds a measured density (from the Hall
+  effect or from the gate voltage), with the interval that the
+  density's error bar maps to, `dn/dmu` and the quantum capacitance
+  `e^2 dn/dmu` in F/cm^2. For graphene these follow the Dirac-cone
+  forms `n = mu^2 / (pi (hbar v_F)^2)` and
+  `C_Q = 2 e^2 |mu| / (pi (hbar v_F)^2)`. Graphene's quantum
+  capacitance was measured by Xia et al., Nature Nanotechnology 4, 505
+  (2009).
 
 **Comparing with optical measurements**
 
@@ -881,11 +970,24 @@ doubtful number, when:
 - the temperature is negative; `drude_weight` also refuses `T = 0`,
   and `berry_dipole(method="fermi")` needs `kT > 0`;
 - `lowest_bands` is asked for the full spectrum, a filling or `mu`
-  lies outside the spectrum, or the SCBA iteration does not converge.
+  lies outside the spectrum, or the SCBA iteration does not converge;
+- `kpm_dos` or `kpm_sigma` is given `bounds` that do not enclose the
+  spectrum (the Chebyshev moments then grow without limit; before
+  0.13.0 the result was silently wrong, a DOS of -4.7e7 in the test);
+- `principal_layers` gets a layer width that is not a positive length;
+- `compare_models` is given an extended model without more parameters,
+  too few data for it, an `embed` that does not reproduce the simple
+  model, or an extended fit that ends worse than the simple one (the
+  models are then not nested, or the fit stopped in another minimum);
+- `chemical_potential_from_density` is asked for a density the bands
+  cannot hold, at `T = 0`, or on a k-mesh so coarse for the temperature
+  that one state carries more than 5 % of `dn/dmu` (then `mu` would
+  jump from one mesh state to the next instead of following the
+  density); `carrier_density` and its inverse refuse finite models.
 
 ## How the results are checked
 
-190 automated tests run on every change, on Python 3.9, 3.10, 3.11,
+222 automated tests run on every change, on Python 3.9, 3.10, 3.11,
 3.12, 3.13 and 3.14, and once more on Python 3.10 with the oldest
 NumPy (1.22.0) and SciPy (1.8.0) the package allows. The numerical
 tests compare the package with a closed-form result, a symmetry, or a
@@ -915,7 +1017,17 @@ tolerances the tests use:
   conductivity, the tensor and the Drude weight by less than 1e-10
   (relative, for the Drude weight).
 - The Drude weight of the half-filled chain equals `8 spin |t| a` to
-  1e-3 relative, and is below 1e-12 for an empty or full band.
+  1e-3 relative, and is below 1e-12 for an empty or full band. At
+  graphene's Dirac point, where the two bands are degenerate, it equals
+  the eigenvector-free form `Tr[(dH/dk)^2] (-df/de)` to 1e-12 in both
+  directions, and on a mesh through K and K' `D_xx = D_yy` to 1e-12, as
+  the hexagonal symmetry requires.
+- The routines that loop over k-points (`bands`, `dos`, `fermi_level`,
+  `carrier_count`, `sigma_optical`, `sigma_tensor`, `drude_weight`)
+  agree with the 0.12.1 one-k-point-at-a-time code, kept in the tests
+  as the reference, to 1e-12 relative for six models (orthogonal,
+  overlapping, complex, spinful, with dipole blocks, and one whose
+  overlap matrix drops a state at every k-point).
 - An on-site transition is exactly dark without a dipole block; with
   one, its peak matches the hand-derived value to 1e-3 relative, in
   the dense route. The same holds in a nonorthogonal basis (two
@@ -989,7 +1101,10 @@ tolerances the tests use:
   1e-12 with overlap); bond currents obey Kirchhoff's law to 1e-7
   and every cut carries T to 1e-6.
 - `principal_layers` reproduces hand-built blocks exactly and refuses
-  layers that are too thin.
+  layers that are too thin. A chain of spacing 1.42 Angstrom cut with
+  width 1.42 gives 40 one-site layers (width 2.84: 20 two-site layers),
+  and the impurity chain built that way matches its closed form to
+  1e-5.
 - `sancho_rubio` refuses at `eta = 0` inside the band; at `eta = 0`
   outside the band it matches the real closed form to 1e-12, and at
   `eta = 1e-12` inside the band the complex one to 1e-10. At the band
@@ -1016,7 +1131,9 @@ tolerances the tests use:
 - Sparse and dense matrices are identical; Lanczos matches the open
   chain's closed form to 1e-8 (with overlap too).
 - KPM DOS: band-centre value within 1 %, integral within 0.5 %, zero
-  outside the band with overlap. KPM conductivity: molecular line
+  outside the band with overlap. The in-place Chebyshev recurrence
+  equals the 0.12.1 one to 1e-12 (exact trace) and bit for bit
+  (stochastic trace); bounds that cut the spectrum are refused. KPM conductivity: molecular line
   weight within 3 % of the closed form, and within 2 % of the dense
   route on a dimerized chain.
 - The time-reversal fold reproduces DOS and conductivity to 1e-12 and
@@ -1059,6 +1176,87 @@ tolerances the tests use:
   absorbs 2.3 %, as reported by Nair et al. (2008); the inverse
   recovers the film's conductivity to 1e-5, and its error bar matches
   20000 seeded noisy measurements within 3 %.
+- `compare_models`: for the chain with and without a second-neighbor
+  hopping (energies linear in the parameters) the chi-squared and F
+  statistics equal the least-squares closed forms computed with
+  `numpy.linalg.lstsq` to 1e-6 relative, and the p-values the
+  chi-squared and F tail functions to 1e-6; across 60 seeded simulated
+  experiments without `t2` the statistic averages 1 (within 0.45; it
+  came out 1.25) and p < 0.1 occurs 1 to 13 times (11); with
+  `t2 = 0.1 eV` the p-value is below 1e-10 and the fitted `t2` is
+  within 4 error bars of the truth.
+- `carrier_density`: the chain matches the exact integral of its
+  density of states (adaptive quadrature) to 1e-9 at five chemical
+  potentials, and graphene matches its closed-form dispersion summed
+  on the same grid to 1e-10, with electron-hole symmetry to 1e-10.
+  The inverse returns the chemical potential to 1e-9, its interval
+  ends reproduce the density minus and plus its error to 1e-6 of the
+  error, `dn/dmu` equals a finite difference of the density to 1e-6
+  and the chain's closed form to 1e-3. For graphene at 0.2 and 0.4 eV
+  (300 K) the density matches the Dirac cone (by quadrature) and the
+  quantum capacitance matches `2 e^2 mu / (pi (hbar v_F)^2)` within
+  1 %; the lattice bands deviate from the cone by 0.1 % and 0.4 %.
+  The elementary charge equals SciPy's exact SI value.
+
+## What changed in 0.13.0
+
+**New**
+
+- `carrier_density` and `chemical_potential_from_density` connect a
+  measured carrier density (Hall effect, gate voltage) with the
+  chemical potential that the optics and transport functions take,
+  with an error interval, `dn/dmu` and the quantum capacitance
+  (tutorial 1).
+- `compare_models` tests whether measured band energies need a richer
+  model, by the likelihood-ratio or F test for nested models
+  (tutorial 2).
+- Two tutorials in `examples/`, each a complete analysis with error
+  bars; the tests run them and check their output.
+
+**Faster**
+
+- `bands`, `dos`, `fermi_level`, `band_edges`, `carrier_count`,
+  `sigma_optical`, `sigma_tensor` and `drude_weight` now assemble and
+  diagonalize the Bloch matrices for many k-points at once instead of
+  one at a time. The results agree with the old loop to 1e-12 (the
+  order of floating-point sums differs). Measured with one thread
+  (median of 5 runs; the lower of two measurements on a shared
+  machine): `sigma_optical` for graphene on a 120 x 120 mesh 140 times
+  faster, `sigma_tensor` on a 48 x 48 mesh 270 times, `dos` 26 times,
+  `bands` at 2000 k-points 100 times, `carrier_count` 110 times. Small
+  cells gain the most; for large cells the matrix algebra dominates
+  either way. The whole test suite runs in under half the time.
+- `kpm_dos` updates its Chebyshev vectors in place: 2.5 times faster
+  for a 1000-site chain with the exact trace, same result to 1e-15.
+
+**Fixed**
+
+- `drude_weight` at a k-point where bands are degenerate (a Dirac point
+  on the mesh) summed only the diagonal of whatever eigenvectors the
+  solver returned inside the degenerate pair, so the result was
+  arbitrary there. For graphene at `mu = 0` with only K on the grid it
+  gave 3068.8 along x but 0.0 along y; on a 30 x 30 mesh `D_xx` and
+  `D_yy` came out 3.538 and 3.281 (7 % apart, where symmetry makes them
+  equal). It now sums over the degenerate pairs, the zero-frequency
+  limit of the Kubo formula: 3068.8 in both directions, and 6.820 for
+  both on the mesh. Away from degeneracies nothing changes (1e-12).
+- `principal_layers` assigned a site that sits exactly on a layer
+  boundary by floating-point division, which can land just below the
+  integer (15 x 1.42 / 1.42 = 14.999999999999998). A chain of spacing
+  1.42 Angstrom cut with width 1.42 was refused as "layers 14 and 16
+  couple", and with width 2.84 one layer got three sites and the next
+  one. Sites within 1e-9 layer widths of a boundary now count on it.
+
+**Clearer errors and documentation**
+
+- `kpm_dos` and `kpm_sigma` refuse `bounds` that do not enclose the
+  spectrum (before: silently wrong, a DOS of -4.7e7 for a 200-site
+  chain with bounds (-1.9, 1.9)); `principal_layers` refuses a layer
+  width that is not a positive length.
+- `sigma_tensor` and `monkhorst_pack` now say that a grid folded by
+  time reversal is not valid for the Hall component: gapped graphene
+  gives `sigma_xy(0) = -0.912` on such a grid instead of 0. Use the full
+  grid for `directions=(0, 1)`.
 
 ## What changed in 0.12.0
 
@@ -1220,6 +1418,19 @@ These are deliberate choices, not oversights:
   covariance, independent Gaussian measurement errors. The p-value
   tests the model and the stated errors together; it cannot say which
   of the two is wrong.
+- `carrier_density` and `chemical_potential_from_density` assume rigid
+  bands: doping or gating only moves `mu` and does not change the
+  Hamiltonian (no self-consistent electrostatics, no screening), and
+  the density is counted from the neutral filling you state. The
+  quantum capacitance is `e^2 dn/dmu` of the model's bands, without
+  disorder broadening.
+- `compare_models` assumes independent Gaussian errors and nested
+  models. Its p-value is exact for energies linear in the parameters
+  and holds for small errors otherwise; it does not apply when the
+  simple model sits on the edge of the extended model's allowed range
+  (a parameter that must be positive, tested at zero).
+- `sigma_tensor` with `a != b` (the Hall component) needs the full
+  k-grid; a grid folded by time reversal gives a wrong result.
 - `sheet_optics` treats normal incidence on a sheet much thinner than
   the wavelength, between transparent media. The back face of a
   substrate and multiple reflections inside it are not included (they
@@ -1229,9 +1440,11 @@ These are deliberate choices, not oversights:
   from `Im sigma`; the inverse assumes the `Im sigma` you give (0 by
   default), which enters only at second order.
 - The package ships no material constants. The only physical constants
-  in the code are the Boltzmann constant and the fine-structure
-  constant, both CODATA 2018 values (Tiesinga, Mohr, Newell and Taylor,
-  Rev. Mod. Phys. 93, 025010 (2021)).
+  in the code are the Boltzmann constant, the fine-structure constant
+  and (since 0.13.0, for the quantum capacitance) the elementary
+  charge, all CODATA 2018 values (Tiesinga, Mohr, Newell and Taylor,
+  Rev. Mod. Phys. 93, 025010 (2021)); the elementary charge is exact in
+  the SI.
 
 ## Relation to existing tools
 
