@@ -10,8 +10,10 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXAMPLES = os.path.join(os.path.dirname(HERE), "examples")
-TUTORIALS = ["tutorial_gated_graphene.py", "tutorial_band_fit_model_check.py"]
-# the sdist ships the tests but not examples/; skip there, run in the repo
+TUTORIALS = ["tutorial_gated_graphene.py", "tutorial_band_fit_model_check.py",
+             "tutorial_thermopower_scattering.py"]
+# examples/ ships in the sdist since 0.14.0 (MANIFEST.in); skip only where
+# it is missing (an installed wheel, or an older sdist)
 pytestmark = pytest.mark.skipif(
     not os.path.isdir(EXAMPLES), reason="examples/ is not in this "
     "distribution (run the tests from the repository)")
@@ -20,7 +22,8 @@ NUM = re.compile(r"[-+]?\d+\.?\d*(?:e[-+]?\d+)?")
 
 def _quoted(path):
     text = open(path).read()
-    block = text.split("Printed output (hamop 0.13.0):\n\n", 1)[1]
+    block = re.split(r"Printed output \(hamop \d+\.\d+\.\d+\):\n\n", text,
+                     maxsplit=1)[1]
     return block.split('"""', 1)[0]
 
 
