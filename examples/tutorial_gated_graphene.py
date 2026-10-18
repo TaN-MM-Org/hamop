@@ -19,7 +19,7 @@ analysis
 
 Nearest-neighbor graphene with t = -2.7 eV and a = 2.46 Angstrom, at
 295 K; mesh 480 x 480 and a Gaussian broadening of 30 meV.  Run time:
-about 3 s.  Printed output (hamop 0.13.0):
+about 3 s.  Printed output (hamop 0.14.0):
 
 Hall density: n = (5.980 +/- 0.047) x 1e12 cm^-2
 chemical potential: mu = 0.2448 eV, interval [0.2438, 0.2458] eV

@@ -14,7 +14,7 @@ the truth.  It
    directly: the band width and the band top at k = pi (1/Angstrom,
    lattice constant 1 Angstrom), for both models.
 
-Run time: about 2 s.  Printed output (hamop 0.13.0):
+Run time: about 2 s.  Printed output (hamop 0.14.0):
 
 step 1, nearest-neighbor fit: chi2 = 245.8 for 18 dof, p = 5.8e-42
 step 2, is t2 needed? Delta chi2 = 236.5 for 1 dof, p = 2.3e-53
