@@ -1,0 +1,5 @@
+# Source distribution extras (since 0.14.0): the tutorial scripts, so that
+# tests/test_tutorials.py runs from the unpacked sdist, and the release
+# notes and citation metadata.
+graft examples
+include CHANGELOG.md CITATION.cff CONTRIBUTING.md

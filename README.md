@@ -25,7 +25,10 @@ computes:
   them, a test of whether the data need a richer model, the chemical
   potential and quantum capacitance that a measured carrier density
   implies, and the transmittance of a 2D sample that an optical
-  measurement would see.
+  measurement would see;
+- the conductivity, the thermopower (Seebeck coefficient) and the
+  electronic heat conductivity of a bulk crystal or a gated 2D sheet,
+  in the relaxation-time (Boltzmann) picture.
 
 The point of the package is that all of these come from the *same*
 matrices. When the optics and the energy levels of one model are
@@ -51,11 +54,12 @@ material come from your own calculation or measurement.
 - [A short guide to the words used here](#a-short-guide-to-the-words-used-here)
 - [Install, units and conventions](#install-units-and-conventions)
 - [Examples](#examples) (each with the output it prints)
-- [Tutorials](#tutorials) (two complete analyses, from data to a result
-  with error bars)
+- [Tutorials](#tutorials) (three complete analyses, from data to a
+  result with error bars)
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
 - [How the results are checked](#how-the-results-are-checked)
+- [What changed in 0.14.0](#what-changed-in-0140)
 - [What changed in 0.13.0](#what-changed-in-0130)
 - [What changed in 0.12.0](#what-changed-in-0120)
 - [What changed in 0.11.0](#what-changed-in-0110)
@@ -83,7 +87,9 @@ material come from your own calculation or measurement.
 - **Periodic model, unit cell** -- a crystal repeats one unit cell.
   The package handles periodicity in any number of directions, and
   also **finite** models (a molecule, a flake, a device) with no
-  repetition (`cell=None`).
+  repetition (`cell=None`). Since 0.14.0 a model can also repeat in
+  fewer directions than its space has, such as a **ribbon** that
+  repeats along x but has a finite width in y (example 14).
 - **Wave vector k, Brillouin zone, k-mesh** -- in a crystal each
   electron state carries a wave vector `k`. All distinct `k` fill one
   cell of "k-space" called the Brillouin zone. Many results are sums
@@ -121,6 +127,13 @@ material come from your own calculation or measurement.
   difference across the device. The Lorenz ratio is the heat
   conductance carried by the electrons divided by `G T`; for a smooth
   `T(E)` it is close to `(pi^2/3)(k/e)^2 = 2.443e-8 V^2/K^2`.
+- **Relaxation time `tau`, Boltzmann transport** -- in a bulk crystal
+  or a large sheet an electron scatters, on average, after a time
+  `tau`. In the Boltzmann picture the conductivity, the Seebeck
+  coefficient and the heat conductivity of the electrons follow from
+  the band velocities and `tau`. The size of `tau` drops out of the
+  Seebeck coefficient, but how `tau` changes with energy does not
+  (tutorial 3).
 - **Green function** -- the matrix `(zS - H)^-1` at the complex
   energy `z = E + i eta`. Its imaginary part gives the local density
   of states (the DOS on each orbital, **LDOS**), and the transmission
@@ -175,6 +188,10 @@ Units and conventions, stated once:
 - Temperature `T = 0` means the exact step occupation; a level exactly
   at `mu` counts as half occupied (the value the Fermi function has at
   `mu` for every `T > 0`).
+- Bulk transport (`boltzmann_transport`) is in SI units: the
+  conductivity in S/m for a 3D model, in S (per square) for a 2D model
+  and in S m for a chain or a ribbon; the Seebeck coefficient in V/K;
+  `tau` in seconds.
 - Transport at finite temperature: conductance in units of `e^2/h`
   (multiply by `e^2/h = 3.874e-5 S` for siemens), current in units of
   `e^2/h` times 1 V (multiply by the same number for amperes), Seebeck
@@ -184,7 +201,7 @@ Units and conventions, stated once:
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with hamop 0.13.0. The model parameters are illustrative
+printed with hamop 0.14.0. The model parameters are illustrative
 values, not fitted to any material, unless the text says otherwise.
 
 ### 1. Graphene: bands and the absorption plateau
@@ -659,13 +676,100 @@ measured spectrum can be compared with `sigma_optical` point by point.
 The substrate index 1.5 and the measured value 0.9805 are illustrative
 numbers, not data for a real sample.
 
+### 13. Conductivity and thermopower of a doped crystal
+
+```python
+import numpy as np
+from hamop import graphene, boltzmann_transport
+
+g = graphene(t=-2.7, a=2.46)
+mu = np.array([0.3, 0.4, -0.3])               # chemical potentials, eV
+r = boltzmann_transport(g, mu, T=300.0, mesh=300, tau=1e-14)   # tau in s
+
+kB = 8.617333262e-5                           # Boltzmann constant, eV/K
+for m, sig, S, L in zip(mu, r["sigma"], r["seebeck"], r["lorenz"]):
+    cone = -(np.pi ** 2 / 3) * kB * (kB * 300.0) / m   # Dirac cone, V/K
+    print(f"mu = {m:+.1f} eV: sigma = {sig[0, 0] * 1e3:.3f} mS, "
+          f"S = {S[0, 0] * 1e6:+.2f} microvolt/K (cone {cone * 1e6:+.2f}), "
+          f"Lorenz ratio {L[0]:.3e} V^2/K^2")
+```
+
+```
+mu = +0.3 eV: sigma = 0.353 mS, S = -24.43 microvolt/K (cone -24.43), Lorenz ratio 2.380e-08 V^2/K^2
+mu = +0.4 eV: sigma = 0.471 mS, S = -18.35 microvolt/K (cone -18.32), Lorenz ratio 2.407e-08 V^2/K^2
+mu = -0.3 eV: sigma = 0.353 mS, S = +24.43 microvolt/K (cone +24.43), Lorenz ratio 2.380e-08 V^2/K^2
+```
+
+`boltzmann_transport` gives the conductivity, Seebeck coefficient and
+electronic heat conductivity of a bulk crystal or a large 2D sheet in
+the relaxation-time approximation of the Boltzmann equation, the
+picture used by the BoltzTraP code (Madsen and Singh, Comput. Phys.
+Commun. 175, 67 (2006)). Here graphene is doped to 0.3 and 0.4 eV
+(electrons) and to -0.3 eV (holes), with a constant relaxation time of
+10 fs. Three checks against the Dirac cone, all exact for a cone at
+this doping: the conductivity equals `(e^2/h)(2 mu tau / hbar)`
+(0.353 and 0.471 mS); the Seebeck coefficient equals
+`-(pi^2/3)(k_B/e)(kT/mu)` (to the printed digits at 0.3 eV, within
+0.2 % at 0.4 eV, where the 300 x 300 mesh limits the accuracy), and it
+changes sign with the carriers; and the Lorenz ratio is below
+`(pi^2/3)(k_B/e)^2 = 2.443e-8 V^2/K^2` by the factor
+`1 - (pi^2/3)(kT/mu)^2`. A constant `tau` cancels in `S` and in the
+Lorenz ratio; `tau` may also be a function of energy (tutorial 3).
+
+### 14. A ribbon: periodic in one direction of the plane
+
+```python
+import numpy as np
+from hamop import TightBindingModel, bands, dos
+
+# A strip of W = 3 rows of the square lattice (spacing 1 Angstrom,
+# hopping t = -1 eV), repeated along x only: one lattice vector in a plane.
+W, t = 3, -1.0
+strip = TightBindingModel(positions=[[0.0, float(y)] for y in range(W)],
+                          norb=1, cell=[[1.0, 0.0]])
+for y in range(W):
+    strip.add_hop(y, y, (1,), [[t]])                 # along the strip
+    if y + 1 < W:
+        strip.add_hop(y, y + 1, (0,), [[t]])         # across it
+
+k = np.array([[0.0, 0.0], [np.pi / 2, 0.0]])         # Cartesian k, 1/Angstrom
+exact = [sorted(2 * t * np.cos(kx) + 2 * t * np.cos(p * np.pi / (W + 1))
+                for p in range(1, W + 1)) for kx in k[:, 0]]
+print("bands agree with the closed form to 1e-12 eV:",
+      np.abs(bands(strip, k) - exact).max() < 1e-12)
+print("cell length:", strip.cell_volume, "Angstrom; reciprocal vector:",
+      np.round(strip.reciprocal_vectors, 4))
+rho = dos(strip, [-2.0, 0.0, 2.0], mesh=600, eta=0.05)
+print("DOS at -2, 0, 2 eV:", np.round(rho, 4), "states/eV per cell")
+```
+
+```
+bands agree with the closed form to 1e-12 eV: True
+cell length: 1.0 Angstrom; reciprocal vector: [[6.2832 0.    ]]
+DOS at -2, 0, 2 eV: [0.7805 0.6105 0.7805] states/eV per cell
+```
+
+A model that repeats in fewer directions than its space has (a ribbon,
+a nanotube, a chain lying in a plane) is built with fewer lattice
+vectors than Cartesian components, here one vector in two dimensions.
+The bands of this strip are the standing waves across it,
+`-2|t| cos(kx) - 2|t| cos(p pi / (W + 1))`, `p = 1..W`. Wave vectors
+stay Cartesian: `monkhorst_pack` places them along the lattice vector,
+and `reciprocal_vectors` gives the matching reciprocal vector. The
+velocity across the strip enters the optics (`sigma_optical` with
+`direction=1` gives the transitions between the standing waves),
+while nothing conducts across it in `boltzmann_transport`. Before
+0.14.0 such a model was accepted, but every function given `mesh=`
+failed with a NumPy error.
+
 ## Tutorials
 
-Two scripts in `examples/` carry a complete analysis from data to a
+Three scripts in `examples/` carry a complete analysis from data to a
 result with error bars. Each uses only `hamop`, makes its own synthetic
-"measured" data with a fixed seed (replace them with yours), runs in a
-few seconds and prints the result below. The test suite runs both and
-checks every printed number.
+"measured" data with a fixed seed (replace them with yours), runs in
+seconds and prints the result below. The test suite runs all three and
+checks every printed number. Since 0.14.0 the scripts are also in the
+source distribution, so the check runs from an unpacked sdist too.
 
 ### Gated graphene: from a Hall density to the absorption edge
 
@@ -718,6 +822,37 @@ step 4, quantities not measured directly:
    same, nearest-neighbor model only: 2.1886 +/- 0.0118 eV
 ```
 
+### Thermopower: what scatters the electrons?
+
+`examples/tutorial_thermopower_scattering.py` takes six gate densities
+of a graphene sheet, each with a Hall density (2 % error) and a Seebeck
+coefficient `S` (error 1.5 microvolt/K) at 300 K. In the Boltzmann
+picture `S` does not depend on the size of the relaxation time, but it
+does depend on how the relaxation time changes with energy. The script
+models that change as `tau ~ |E|^p` and finds `p` from the data: it
+turns each density into `mu` with `chemical_potential_from_density`,
+computes `S(mu)` with `boltzmann_transport`, adds the spread of `S`
+over each `mu` interval to the error of that point, and fits `p` by
+weighted least squares. The data were made with `p = 1`, for which the
+conductivity of the Dirac cone grows linearly with the density. The
+fit recovers `p = 1.00 +/- 0.02` with an acceptable chi-squared, and
+the constant-`tau` model (`p = 0`), which predicts about half the
+measured thermopower, is ruled out.
+
+```
+n (1e12/cm^2)   mu (eV)   S measured     S fit   S, constant tau
+   2.00      0.1364    -94.0 +/- 1.5    -94.9        -50.3
+   3.08      0.1727    -81.3 +/- 1.5    -80.2        -43.1
+   4.10      0.2008    -67.8 +/- 1.5    -68.2        -35.3
+   4.95      0.2218    -66.4 +/- 1.5    -63.9        -33.2
+   6.46      0.2546    -52.5 +/- 1.5    -55.1        -28.4
+   7.92      0.2827    -50.8 +/- 1.5    -50.8        -26.0
+(S in microvolt/K; negative: electrons)
+scattering exponent p = 1.00 +/- 0.02   (tau ~ |E|^p)
+fit: chi2 = 5.8 for 5 dof, p-value 0.33
+constant tau (p = 0): chi2 = 2779 for 6 dof, p-value 10^-597
+```
+
 ## What is in the package
 
 Each function's docstring (`help(hamop.sigma_optical)`, for example)
@@ -731,7 +866,10 @@ gives its inputs, units and conventions.
   `set_dipole(i, X)` adds on-site position blocks; `bloch(k)` and
   `bloch_derivative(k, direction)` return `H(k), S(k)` and their
   exact `k`-derivatives; `monkhorst_pack(mesh, time_reversal=False)`
-  returns an even k-grid with weights.
+  returns an even k-grid with weights; `reciprocal_vectors` (new in
+  0.14.0) gives the reciprocal lattice vectors. The cell may have fewer
+  lattice vectors than Cartesian dimensions (a ribbon, example 14);
+  lattice vectors that are linearly dependent are refused.
 - `gen_eigh(H, S)` -- eigenvalues of `H c = E S c`. It drops overlap
   directions below a threshold ("canonical orthogonalization"; Szabo
   and Ostlund, *Modern Quantum Chemistry*, sec. 3.4.5), so a nearly
@@ -888,6 +1026,20 @@ gives its inputs, units and conventions.
   capacitance was measured by Xia et al., Nature Nanotechnology 4, 505
   (2009).
 
+**Bulk transport (new in 0.14.0)**
+
+- `boltzmann_transport` -- the conductivity tensor, the Seebeck tensor,
+  the electronic thermal conductivity at zero current and the Lorenz
+  ratio of a periodic model, in the relaxation-time approximation of
+  the Boltzmann equation (Madsen and Singh, Comput. Phys. Commun. 175,
+  67 (2006)), for one chemical potential or many at once (example 13,
+  tutorial 3). The relaxation time is a constant or a function of the
+  state's energy. The band velocities are the same velocity matrix
+  elements as in the Kubo functions, so overlap models are handled,
+  and where bands are degenerate the sum runs over the degenerate pairs,
+  as in `drude_weight`. With a constant relaxation time the conductivity
+  equals the Drude weight times `tau / (pi hbar)`.
+
 **Comparing with optical measurements**
 
 - `sheet_optics`, `sheet_conductivity_from_transmittance` (example 12):
@@ -983,11 +1135,28 @@ doubtful number, when:
   cannot hold, at `T = 0`, or on a k-mesh so coarse for the temperature
   that one state carries more than 5 % of `dn/dmu` (then `mu` would
   jump from one mesh state to the next instead of following the
-  density); `carrier_density` and its inverse refuse finite models.
+  density); `carrier_density` and its inverse refuse finite models;
+- `boltzmann_transport` gets a finite model, `T <= 0`, a relaxation
+  time that is not positive and finite for every state, a `mu` with no
+  state within 60 `kT` (far outside the bands or deep inside a wide
+  gap), a `mu` at which nothing conducts (a flat band), or a k-mesh so
+  coarse for the temperature that one state carries more than 5 % of
+  the conductivity;
+- `symmetry_fold` is given a mesh that an operation maps off itself
+  (since 0.14.0; for example the four-fold rotation on an (8, 4)
+  mesh, which before gave wrong weights), or a model with fewer lattice
+  vectors than dimensions (also refused by `find_point_group`);
+- `TightBindingModel` is given lattice vectors that are linearly
+  dependent or more numerous than the Cartesian dimensions (since
+  0.14.0; before, the first k-grid failed with a NumPy error);
+- `bands` is asked for a model whose number of bands changes with `k`
+  (overlap directions dropped at some k-points), which cannot form one
+  array; `dos`, `fermi_level`, `band_edges`, `carrier_count` and
+  `carrier_density` handle such models.
 
 ## How the results are checked
 
-222 automated tests run on every change, on Python 3.9, 3.10, 3.11,
+253 automated tests run on every change, on Python 3.9, 3.10, 3.11,
 3.12, 3.13 and 3.14, and once more on Python 3.10 with the oldest
 NumPy (1.22.0) and SciPy (1.8.0) the package allows. The numerical
 tests compare the package with a closed-form result, a symmetry, or a
@@ -1042,6 +1211,16 @@ tolerances the tests use:
   like the dense one.
 - `sigma_xy(0)` equals the Chern number times `e^2/h` to 1e-6, sign
   included, and the tensor is antisymmetric to 1e-12.
+- The block versions of `berry_curvature` (and so `chern_number`),
+  `band_curvatures`, `berry_dipole` and `quantum_weight` (0.14.0) agree
+  with the 0.13.0 point-by-point code, kept in the tests as the
+  reference: plaquette fluxes to 1e-10 for six models in both frames
+  (Haldane in both phases, with overlap, Kane-Mele, all bands, and a
+  Hofstadter cell with three filled bands; measured differences are
+  below 1e-14), the energies at the plaquette centers to 1e-12 and the
+  curvature dipole (`method="fermi"`) to 1e-10 relative, and the
+  quantum-weight tensor to 1e-9 relative (its finite differences
+  amplify rounding; measured 1e-12).
 - The SSH chain's Zak phases are 0 or pi to 1e-9 and differ by pi,
   with and without overlap.
 - The Kane-Mele model equals two Haldane copies to 1e-12, and its gap
@@ -1140,7 +1319,18 @@ tolerances the tests use:
   the Drude weight to 1e-10; the six-fold fold of graphene reproduces
   the DOS to 1e-12 and the chemical potential to 1e-9, and wrong
   operations are refused. `find_point_group` finds 12, 8 and 2
-  operations for the hexagonal, square and chain lattices.
+  operations for the hexagonal, square and chain lattices. Operations
+  given as a generator are checked like a list. On an uneven mesh,
+  (8, 4) or (6, 3), a group that moves grid points off the grid is
+  refused, and the two axis mirrors of the square lattice, which fit,
+  reproduce the full-grid DOS to 1e-12. The array versions of the
+  orbit fold and of the time-reversal fold (0.14.0) give the points,
+  order and weights of the 0.13.0 loops (weights exactly, k-points to
+  1e-13).
+- A model whose overlap matrix drops a state at one k-point only:
+  `fermi_level` returns the root of `carrier_count` to 1e-9,
+  `band_edges` the extremes of a k-point-by-k-point loop exactly, and
+  `carrier_density` and its inverse are consistent to 1e-8.
 - Fourier interpolation reproduces the bands to 1e-12 for five models
   and flags a too-coarse grid.
 - A hand-written graphene `hr.dat` reproduces `graphene()` bands to
@@ -1197,6 +1387,88 @@ tolerances the tests use:
   quantum capacitance matches `2 e^2 mu / (pi (hbar v_F)^2)` within
   1 %; the lattice bands deviate from the cone by 0.1 % and 0.4 %.
   The elementary charge equals SciPy's exact SI value.
+
+**Bulk transport and ribbons (0.14.0)**
+
+- `boltzmann_transport` for the chain matches an adaptive quadrature of
+  the closed-form dispersion (no eigenvectors, no mesh) to 1e-9 for the
+  conductivity, the Seebeck coefficient and the Lorenz ratio, with a
+  constant and with an energy-dependent relaxation time (measured
+  1e-13). Graphene at +/-0.3 eV and 300 K matches the Dirac-cone closed
+  forms within 1 % (measured deviations below 2.5e-3): the conductivity
+  `e^2 tau v_F^2 N(mu) / 2`, the Seebeck coefficient
+  `-(pi^2/3)(k_B/e)(kT/mu)`, the Lorenz ratio
+  `(pi^2/3)(k_B/e)^2 [1 - (pi^2/3)(kT/mu)^2]`, and, for `tau ~ |E|`,
+  the Seebeck coefficient of a conductivity that grows as `E^2`. With a
+  constant relaxation time the conductivity equals the Drude weight
+  times `tau / (pi hbar)` to 1e-10, at the Dirac point too; rotating an
+  anisotropic crystal rotates all three tensors to 1e-9; a constant
+  relaxation time scales the conductivity and drops out of `S` and the
+  Lorenz ratio to 1e-12. The Planck constant equals SciPy's exact SI
+  value.
+- A chain lying at 30 degrees in a plane gives the DOS, chemical
+  potential and carrier density of `linear_chain` to 1e-12, and its
+  Drude weight and Boltzmann conductivity projected on x and y are the
+  chain's times cos^2 and sin^2 of the angle. A strip of the square
+  lattice matches its closed-form bands to 1e-12 and, built a second
+  way as a 2D model with a vacuum cell, gives the same DOS, optics and
+  Boltzmann results to 1e-12.
+
+## What changed in 0.14.0
+
+**New**
+
+- `boltzmann_transport`: the conductivity, Seebeck coefficient and
+  electronic heat conductivity of a bulk crystal or a gated sheet, with
+  a constant or an energy-dependent relaxation time, for many chemical
+  potentials at once (example 13). Tutorial 3 uses it to find how the
+  relaxation time changes with energy from thermopower data.
+- Models periodic in fewer directions than their space, such as ribbons
+  (example 14). `TightBindingModel.reciprocal_vectors` gives the
+  reciprocal lattice vectors.
+- The tutorial scripts are part of the source distribution, so their
+  check runs from an unpacked sdist as well.
+
+**Faster**
+
+- `chern_number`, `berry_curvature`, `band_curvatures`, `berry_dipole`
+  and `quantum_weight` assemble and diagonalize all k-points at once.
+  Measured with one thread (median of 3 runs; the lower of two
+  measurements on a shared machine): `chern_number` for the Haldane
+  model on a 48 x 48 mesh 98 times faster, `berry_dipole` on a
+  48 x 48 mesh 140 times (`method="grad"`) and 160 times
+  (`method="fermi"`), `quantum_weight` on an 18 x 18 mesh 120 times.
+  The results agree with the old loops to rounding (1e-12 or better).
+- `symmetry_fold` and `monkhorst_pack(..., time_reversal=True)` fold the
+  grid with integer array operations: 10 times faster for graphene's
+  12 operations on a 60 x 60 mesh, 17 times for the time-reversal fold
+  of a 300 x 300 mesh. The k-points and weights are those of 0.13.0
+  (the weights exactly, the k-points to rounding).
+
+**Fixed**
+
+- `symmetry_fold` with the operations given as a generator used the
+  generator up before the spectral check, so a non-symmetry was folded
+  without being checked. Graphene with one strained bond and the
+  three-fold rotation gave a DOS of 0.2636 instead of 0.2393 at -3 eV
+  (10 % off). It is now refused, as it was for a list.
+- `symmetry_fold` on an uneven mesh, such as (8, 4), mapped the grid
+  indices instead of the grid points, so an operation that moves points
+  off the grid was not noticed and the weights were wrong: the square
+  lattice's DOS at 0.5 eV came out 0.0422 instead of 0.0729, and
+  graphene's at 0.5 eV on a (6, 3) mesh 0.0000 instead of 0.0737. Such a
+  fold is now refused, and a group that fits the mesh gives the
+  full-grid result. Even meshes are unchanged.
+- `fermi_level`, `band_edges` and `carrier_density` failed with a NumPy
+  error ("inhomogeneous shape") for a model whose overlap matrix drops
+  a state at some k-points only; `dos` and `carrier_count` handled it.
+  They now count the states one by one. `bands`, which must return one
+  array, refuses such a model with an explanation.
+- A model with fewer lattice vectors than dimensions (a ribbon) was
+  accepted, but `monkhorst_pack`, `cell_volume` and every function
+  given `mesh=` failed with a NumPy error. It is now supported (see
+  New); lattice vectors that cannot form a lattice are refused when the
+  model is built.
 
 ## What changed in 0.13.0
 
@@ -1439,12 +1711,29 @@ These are deliberate choices, not oversights:
   two directions. A transmittance alone cannot separate `Re sigma`
   from `Im sigma`; the inverse assumes the `Im sigma` you give (0 by
   default), which enters only at second order.
+- `boltzmann_transport` uses the relaxation-time approximation: one
+  relaxation time per state that depends on the state's energy only
+  (not on its direction or on k), no scattering back into the state
+  (no vertex corrections), and only the electrons' heat conduction (no
+  phonons, no phonon drag). It needs `hbar / tau` small against `kT`
+  and the band spacing, and it does not give the Hall coefficient. On
+  a model with fewer lattice vectors than dimensions the Seebeck tensor
+  is taken in the conducting directions only.
+- Models with fewer lattice vectors than dimensions (ribbons) work with
+  the bands, DOS, optics, carrier and Boltzmann functions,
+  `berry_phase`, the time-reversal fold and Fourier interpolation.
+  `berry_curvature`, `chern_number`, `band_curvatures`, `berry_dipole`,
+  `quantum_weight` and `magnetic_supercell` need a 2D model with two
+  lattice vectors, and `symmetry_fold` and `find_point_group` need as
+  many lattice vectors as dimensions; they refuse a ribbon. The optical conductivity of a ribbon is per unit
+  length (unit `e^2/(4 hbar)` times Angstrom), as for a 1D chain.
 - The package ships no material constants. The only physical constants
-  in the code are the Boltzmann constant, the fine-structure constant
-  and (since 0.13.0, for the quantum capacitance) the elementary
-  charge, all CODATA 2018 values (Tiesinga, Mohr, Newell and Taylor,
-  Rev. Mod. Phys. 93, 025010 (2021)); the elementary charge is exact in
-  the SI.
+  in the code are the Boltzmann constant, the fine-structure constant,
+  (since 0.13.0, for the quantum capacitance) the elementary charge and
+  (since 0.14.0, for the Boltzmann coefficients) the Planck constant,
+  all CODATA 2018 values (Tiesinga, Mohr, Newell and Taylor, Rev. Mod.
+  Phys. 93, 025010 (2021)); the elementary charge and the Planck
+  constant are exact in the SI.
 
 ## Relation to existing tools
 

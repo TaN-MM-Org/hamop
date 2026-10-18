@@ -5,6 +5,163 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## 0.14.0 (2026-10-18)
+
+Bulk thermoelectric transport, models periodic in fewer directions
+than their space (ribbons, which crashed before), three bugs fixed in
+the k-grid folding and the band filling, the topology and geometry
+loops made many times faster, and a third tutorial. No public function was removed or
+renamed; results of valid calls are unchanged except where a bug is
+fixed below (and by floating-point rounding, about 1e-12 relative or
+less, where the topology sums are now taken as array operations).
+
+### Added
+
+- `boltzmann_transport(model, mu, T, mesh=None, kpts=None, weights=None,
+  tau=1e-14, spin=2, ...)` (new module `hamop.boltzmann`): the
+  conductivity tensor, the Seebeck tensor, the electronic thermal
+  conductivity at zero current and the Lorenz ratio in the
+  relaxation-time approximation of the Boltzmann equation, in SI units
+  (G. K. H. Madsen and D. J. Singh, Comput. Phys. Commun. 175, 67
+  (2006), Eqs. 9 to 18), for one chemical potential or an array of them
+  from one diagonalization. `tau` is a constant (seconds) or a function
+  of the state energy. Band velocities are the Kubo velocity matrix
+  elements (overlap included); at degenerate k-points the sum runs over
+  the degenerate pairs, as in `drude_weight`. Refused: finite models,
+  `T <= 0`, a relaxation time that is not positive and finite, a `mu`
+  with no state within 60 kT, a `mu` at which nothing conducts, and a
+  mesh on which one state carries more than 5 % of the conductivity.
+  Tests: the chain against an adaptive quadrature of its closed-form
+  dispersion (1e-9; measured 1e-13) for constant and energy-dependent
+  `tau`; graphene at +/-0.3 eV, 300 K, against the Dirac-cone closed
+  forms of sigma, S, the Lorenz ratio and S for `tau ~ |E|` (1 %;
+  measured below 2.5e-3); sigma against the Drude weight times
+  `tau / (pi hbar)` (1e-10); rotation of an anisotropic crystal (1e-9);
+  scaling with a constant `tau` (1e-12).
+- `hamop.model.H_PLANCK = 6.62607015e-34` J s, exact in the SI (CODATA
+  2018), and `HBAR_EVS` derived from it and `E_CHARGE`; the tests check
+  them against `scipy.constants`.
+- Periodic models with fewer lattice vectors than Cartesian dimensions
+  (a ribbon, a chain in a plane): `cell` of shape (p, dim) with p < dim.
+  The k-points stay Cartesian; `monkhorst_pack` places them in the span
+  of the lattice vectors; `cell_volume` is the length or area of the
+  cell. New property `TightBindingModel.reciprocal_vectors`. Tests: a
+  chain at 30 degrees in a plane against `linear_chain` (DOS, chemical
+  potential, carrier density to 1e-12; Drude weight and Boltzmann
+  conductivity projected by cos^2 and sin^2); the SSH chain in a plane
+  (Zak phase, 1e-12); a square-lattice strip against its closed-form
+  bands and against the same strip in a 2D cell with vacuum (DOS,
+  optics, Boltzmann, 1e-12).
+- `MANIFEST.in`: the source distribution now contains `examples/`,
+  `CHANGELOG.md`, `CITATION.cff` and `CONTRIBUTING.md`, so
+  `tests/test_tutorials.py` runs from the unpacked sdist (before it was
+  skipped there).
+
+### Fixed
+
+- `symmetry_fold` iterated `ops` twice; given a generator, the first
+  loop used it up and the spectral check saw no operation, so a
+  non-symmetry was folded silently. Graphene with one bond of -3.2 eV
+  (the others -2.7 eV) and the three-fold rotation, mesh 12, DOS with
+  eta = 0.1 eV at -3, 1 and 2.5 eV: before 0.2636, 0.0492, 0.2212 (full
+  grid 0.2393, 0.0657, 0.2078); now ValueError, as for a list. Test:
+  `test_symmetry_fold_checks_operations_given_as_a_generator`.
+- `symmetry_fold` mapped grid indices (idx g) instead of grid points
+  ((idx / mesh) g), which differ when the mesh is uneven, so an
+  operation that moves points off the grid was not detected and the
+  orbits were wrong. Square lattice with second neighbors, mesh (8, 4),
+  its 8 operations, DOS with eta = 0.2 eV at 0.5 and 2 eV: before 0.0422
+  and 0.1310 (full grid 0.0729 and 0.2574); graphene on (6, 3) at 0.5
+  eV: before 0.0000 (full grid 0.0737). Now refused; the axis mirrors,
+  which fit the (8, 4) and (6, 3) meshes, reproduce the full grid to
+  1e-12. For even meshes the result is exactly the same as before.
+  Test: `test_symmetry_fold_with_an_uneven_mesh`.
+- `fermi_level`, `band_edges`, `carrier_density` and
+  `chemical_potential_from_density` raised NumPy's "inhomogeneous
+  shape" ValueError (NumPy >= 1.24; an object array that failed later
+  with older NumPy) for a model whose overlap matrix drops a state at
+  some k-points only, while `dos`, `carrier_count` and `sigma_optical`
+  handled it. For the test model (two orbitals, S singular at k = 0,
+  mesh 24) `fermi_level(model, 0.5)` now returns -0.16244 eV, the root
+  of `carrier_count` to 1e-9, and `band_edges` the extremes of a
+  k-point-by-k-point loop. `bands` refuses such a model with an
+  explanation (it must return an (nk, nbands) array). Test:
+  `test_band_count_that_changes_with_k`.
+- A cell with fewer lattice vectors than dimensions was accepted by
+  `TightBindingModel`, but `monkhorst_pack`, `cell_volume` and every
+  function given `mesh=` raised LinAlgError ("Last 2 dimensions of the
+  array must be square"); it is now supported (see Added). Test:
+  `test_chain_in_a_plane_equals_the_one_dimensional_chain`.
+
+### Changed
+
+- `TightBindingModel` refuses lattice vectors that are not finite,
+  linearly dependent, or more numerous than the Cartesian dimensions
+  (before: LinAlgError or "Singular matrix" at the first k-grid). Test:
+  `test_cells_that_are_not_lattices_are_refused`.
+- `symmetry_fold` checks the mesh (one positive count per lattice
+  vector); `symmetry_fold` and `find_point_group` refuse a cell with
+  fewer lattice vectors than dimensions; `berry_curvature` refuses a
+  mesh below 1 (before: an empty array and a Chern number of 0).
+- `tests/test_tutorials.py` reads the quoted output for any version
+  number, and the two existing tutorials quote "hamop 0.14.0" (their
+  output is unchanged).
+- Type hints on the new functions.
+
+### Performance
+
+- `berry_curvature` (and with it `chern_number`, `band_curvatures` and
+  `berry_dipole`), the plaquette-center loops of `band_curvatures` and
+  `berry_dipole(method="fermi")`, and `quantum_weight` assemble and
+  diagonalize all k-points at once (new private helpers
+  `hamop.berry._bloch_periodic_many`, `_states_many`, `_links_many`,
+  `hamop.geometry._qgt_many`). The sparse solver keeps the
+  point-by-point loop. Measured speedups (one thread, median of 3 or 5
+  runs, the lower of two measurements of each on a shared 2-CPU
+  machine): `chern_number` for the Haldane model on a 48 x 48 mesh
+  98x (3.24 s to 0.033 s); with overlap in the atomic frame, mesh 24,
+  20x (5.64 s to 0.28 s); `berry_dipole` on a 48 x 48 mesh 140x
+  (`method="grad"`, 4.90 s to 0.035 s) and 160x (`method="fermi"`,
+  12.9 s to 0.079 s); `quantum_weight` for the Haldane model on an
+  18 x 18 mesh 120x (3.73 s to 0.031 s). Equality is checked in
+  `tests/test_batched_topology.py` against the 0.13.0 loops, kept there
+  as the reference: plaquette fluxes to 1e-10 for six models in both
+  frames (measured below 1e-14), energies to 1e-12, the curvature dipole
+  to 1e-10 relative, the quantum-weight tensor to 1e-9 relative (finite
+  differences amplify rounding; measured 1e-12).
+- `symmetry_fold` and `monkhorst_pack(time_reversal=True)` fold the grid
+  with integer array operations instead of a Python loop over the
+  points: `symmetry_fold` for graphene with its 12 operations on a
+  60 x 60 mesh 10x (1.68 s to 0.16 s), with time reversal on a
+  120 x 120 mesh 36x (12.1 s to 0.34 s); the time-reversal fold of
+  `monkhorst_pack` on a 300 x 300 mesh 17x (0.64 s to 0.037 s). The
+  points, their order and the weights are integer logic and the same
+  divisions; the tests compare them with the 0.13.0 loops, the weights
+  exactly and the Cartesian k-points to 1e-13 (they pass through a
+  matrix product) (`test_vectorized_grid_folds_equal_the_old_loops`).
+- `boltzmann_transport` sums its three moments for each chemical
+  potential with one matrix product over the states.
+
+### Tutorials
+
+- `examples/tutorial_thermopower_scattering.py`: six gate densities of
+  graphene, each with a Hall density and a Seebeck coefficient at
+  300 K; the densities become chemical potentials with intervals, and a
+  weighted least-squares fit of `tau ~ |E|^p` to the thermopower gives
+  p = 1.00 +/- 0.02 (chi-squared 5.8 for 5 dof), while a constant `tau`
+  is ruled out (chi-squared 2779). About 8 s of CPU time. The output is
+  quoted in the script and the README and checked by
+  `tests/test_tutorials.py`.
+
+### Tests
+
+- 253 tests (222 before): new `tests/test_boltzmann.py` (8),
+  `tests/test_regressions_0140.py` (8), `tests/test_batched_topology.py`
+  (14 including parametrized cases), and one more case in
+  `tests/test_tutorials.py`. The new tests take about 40 s on a shared
+  2-CPU machine, 24 s of it the new tutorial script (about 8 s of CPU
+  time).
+
 ## 0.13.0 (2026-10-17)
 
 Two tools for a lab's own data, two bugs fixed, the k-point loops made
