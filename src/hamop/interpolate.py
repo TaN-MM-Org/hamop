@@ -84,7 +84,7 @@ def fourier_interpolation(model: TightBindingModel,
     dim = model.cell.shape[0]
     if np.isscalar(mesh):
         mesh = (int(mesh),) * dim
-    recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
+    recip = model.reciprocal_vectors
     grids = [np.arange(n) for n in mesh]
     idx = np.stack(np.meshgrid(*grids, indexing="ij"),
                    axis=-1).reshape(-1, dim)

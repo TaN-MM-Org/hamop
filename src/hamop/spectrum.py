@@ -21,26 +21,68 @@ if TYPE_CHECKING:
 __all__ = ["bands", "dos", "fermi_level", "band_edges", "k_path"]
 
 
-def _eigs(model, kpts, thresh):
-    """Eigenvalues at every k-point, shape (nk, nao).  Since 0.13.0 the
-    Bloch matrices are assembled and diagonalized a block of k-points at
-    a time (`hamop.eigsolve._eig_chunks`), which gives the same
-    eigenvalues as the former one-k-point loop to rounding (1e-12 in the
-    tests) and is many times faster for small cells."""
+def _eig_rows(model, kpts, thresh):
+    """Eigenvalues at every k-point, one 1D array per k-point.  Since
+    0.13.0 the Bloch matrices are assembled and diagonalized a block of
+    k-points at a time (`hamop.eigsolve._eig_chunks`), which gives the
+    same eigenvalues as the former one-k-point loop to rounding (1e-12 in
+    the tests) and is many times faster for small cells.  Where canonical
+    orthogonalization drops overlap directions the rows can differ in
+    length."""
     if not isinstance(kpts, np.ndarray):
         kpts = list(kpts)
     if len(kpts) == 0:
-        return np.array([])
+        return []
     out = []
     for _, e, _, _ in _eig_chunks(model, kpts, np.ones(len(kpts)),
                                   thresh=thresh):
         out.extend(e)
-    return np.array(out)
+    return out
+
+
+_RAGGED = ("the overlap matrix is nearly singular at some k-points, where "
+           "canonical orthogonalization drops states (thresh = {:g}), so "
+           "the number of bands changes with k and the eigenvalues do not "
+           "form an (nk, nbands) array; take the k-points one at a time "
+           "with gen_eigh, or use dos, fermi_level, band_edges or "
+           "carrier_count, which handle a changing band count")
+
+
+def _is_ragged(rows):
+    return len({len(r) for r in rows}) > 1
+
+
+def _eigs(model, kpts, thresh):
+    """Eigenvalues at every k-point, shape (nk, nao); refused with an
+    explanation when the band count changes with k (before 0.14.0 NumPy
+    raised "inhomogeneous shape" here, or, with NumPy < 1.24, built an
+    object array that failed later)."""
+    rows = _eig_rows(model, kpts, thresh)
+    if len(rows) == 0:
+        return np.array([])
+    if _is_ragged(rows):
+        raise ValueError(_RAGGED.format(thresh))
+    return np.array(rows)
+
+
+def _flat_states(rows, weights):
+    """All kept states as one array, with the weight of the k-point each
+    belongs to."""
+    w = np.asarray(weights, dtype=float).ravel()
+    ev = np.concatenate([np.asarray(r, dtype=float) for r in rows])
+    wv = np.repeat(w, [len(r) for r in rows])
+    return ev, wv
 
 
 def bands(model: TightBindingModel, kpts: Iterable,
           thresh: float = 1e-10) -> np.ndarray:
-    """Eigenvalues along a list of Cartesian k-points; shape (nk, nao)."""
+    """Eigenvalues along a list of Cartesian k-points; shape (nk, nao).
+
+    With overlap, canonical orthogonalization can drop states where S(k)
+    is nearly singular (see `gen_eigh`); if that changes the number of
+    bands along the list, the bands cannot form one array and the call
+    is refused with an explanation (since 0.14.0; before, NumPy raised
+    an "inhomogeneous shape" error)."""
     return _eigs(model, kpts, thresh)
 
 
@@ -84,11 +126,20 @@ def fermi_level(model: TightBindingModel, filling: float,
     if T < 0:
         raise ValueError("T must be >= 0 K")
     kpts, weights = _grid(model, mesh, kpts, weights)
-    eigs = _eigs(model, kpts, thresh)
+    rows = _eig_rows(model, kpts, thresh)
+    if not _is_ragged(rows):
+        eigs = np.array(rows)
 
-    def count(mu):
-        f = fermi_dirac(eigs, mu, T)
-        return float((f * np.asarray(weights)[:, None]).sum())
+        def count(mu):
+            f = fermi_dirac(eigs, mu, T)
+            return float((f * np.asarray(weights)[:, None]).sum())
+    else:
+        # the band count changes with k (states dropped by canonical
+        # orthogonalization); before 0.14.0 this raised a NumPy error
+        eigs, wv = _flat_states(rows, weights)
+
+        def count(mu):
+            return float((fermi_dirac(eigs, mu, T) * wv).sum())
 
     lo, hi = eigs.min() - 5.0, eigs.max() + 5.0
     if not (count(lo) <= filling <= count(hi)):
@@ -112,7 +163,9 @@ def band_edges(model: TightBindingModel, mu: float,
     """(valence-band maximum, conduction-band minimum, gap) about mu."""
     # weights play no role in the band edges, so they are not checked
     kpts, _ = _grid(model, mesh, kpts, None)
-    eigs = _eigs(model, kpts, thresh)
+    rows = _eig_rows(model, kpts, thresh)
+    eigs = (np.array(rows) if not _is_ragged(rows)
+            else np.concatenate(rows))      # band count changes with k
     below = eigs[eigs <= mu]
     above = eigs[eigs > mu]
     if below.size == 0 or above.size == 0:

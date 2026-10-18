@@ -39,6 +39,11 @@ ALPHA = 7.2973525693e-3  # fine-structure constant (CODATA 2018)
 # elementary charge in coulomb, exact in the 2019 SI (CODATA 2018 lists
 # it as exact); used only to turn e^2 dn/dmu into farad (new in 0.13.0)
 E_CHARGE = 1.602176634e-19
+# Planck constant in J s, exact in the 2019 SI (CODATA 2018 lists it as
+# exact); with E_CHARGE it gives hbar in eV s, used by the Boltzmann
+# transport coefficients (new in 0.14.0)
+H_PLANCK = 6.62607015e-34
+HBAR_EVS = H_PLANCK / (2.0 * np.pi * E_CHARGE)
 
 
 def fermi_dirac(e: ArrayLike, mu: float, T: float) -> np.ndarray:
@@ -83,13 +88,37 @@ def check_kgrid(kpts, weights, wtol: float = 1e-6):
     return kpts, w
 
 
+def _check_cell(cell: np.ndarray) -> None:
+    """Refuse lattice vectors that do not span a lattice: non-finite
+    entries, more lattice vectors than Cartesian components, or vectors
+    that are linearly dependent (zero length, area or volume).  Before
+    0.14.0 such a cell was accepted and every k-grid function then
+    failed with a NumPy LinAlgError."""
+    if cell.ndim != 2 or not np.all(np.isfinite(cell)):
+        raise ValueError("cell must be a finite 2D array of lattice "
+                         "vectors (one per row)")
+    n_vec, n_cart = cell.shape
+    if n_vec > n_cart:
+        raise ValueError(f"{n_vec} lattice vectors in {n_cart} Cartesian "
+                         "dimensions cannot be independent")
+    sv = np.linalg.svd(cell, compute_uv=False)
+    if not sv[-1] > 1e-12 * sv[0]:
+        raise ValueError("the lattice vectors are linearly dependent (the "
+                         "cell has zero length, area or volume)")
+
+
 class TightBindingModel:
     """Sites, orbitals and directed hopping blocks; assembles H(k), S(k).
 
     positions: (nsite, dim) Cartesian site positions (Angstrom).
     norb: int or sequence, orbitals per site.
-    cell: (dim, dim) lattice vectors as rows (Angstrom), or None for a
-    finite system.
+    cell: (p, dim) lattice vectors as rows (Angstrom), p <= dim, or None
+    for a finite system.  p = dim is a bulk crystal; p < dim (since
+    0.14.0) is a system periodic in fewer directions than its space,
+    such as a nanoribbon (p = 1 in a plane) or a chain or a sheet in
+    3D space.  Wave vectors stay Cartesian with dim components; the
+    k-grids of ``monkhorst_pack`` lie in the span of the lattice
+    vectors.
     """
 
     def __init__(self, positions: ArrayLike, norb: Union[int, ArrayLike],
@@ -116,6 +145,8 @@ class TightBindingModel:
                 f"components but the positions have "
                 f"{self.positions.shape[1]}; give both in the same "
                 "Cartesian dimension")
+        if self.cell is not None:
+            _check_cell(self.cell)
         self.offsets = np.concatenate([[0], np.cumsum(self.norb)])
         self.nao = int(self.offsets[-1])
         self._hops = []
@@ -393,7 +424,7 @@ class TightBindingModel:
             raise ValueError(f"mesh must give {dim} positive point "
                              f"count(s), one per lattice vector; got "
                              f"{mesh}")
-        recip = 2.0 * np.pi * np.linalg.inv(self.cell).T
+        recip = self.reciprocal_vectors
         if not time_reversal:
             grids = [np.arange(n) / n for n in mesh]
             frac = np.stack(np.meshgrid(*grids, indexing="ij"),
@@ -414,30 +445,48 @@ class TightBindingModel:
                 "for sigma_optical and sigma_tensor; use "
                 "the full grid (time_reversal=False), or symmetry_fold("
                 "..., time_reversal=True) for eigenvalue-only quantities")
+        # Index tuples in C order, so their lexicographic order is the order
+        # of the flat index.  Since 0.14.0 this is done with integer array
+        # operations instead of a Python loop over the grid; the kept
+        # points, their order, the fractions i / n and the weights are the
+        # same numbers as before (integer logic and the same divisions;
+        # the tests compare with the old loop: weights exactly, k-points to
+        # 1e-13, as they pass through the product with recip).
+        mesh_a = np.asarray(mesh, dtype=np.int64)
+        idx = np.indices(mesh, dtype=np.int64).reshape(dim, -1).T
+        flat = np.arange(idx.shape[0], dtype=np.int64)
+        partner = np.ravel_multi_index(((-idx) % mesh_a).T, mesh)
+        keep = flat <= partner                # its partner represents it
         ntot = int(np.prod(mesh))
-        frac_rows, weights = [], []
-        for flat in range(ntot):
-            idx, rest = [], flat
-            for n in reversed(mesh):
-                idx.append(rest % n)
-                rest //= n
-            idx = tuple(reversed(idx))
-            partner = tuple((-i) % n for i, n in zip(idx, mesh))
-            if idx > partner:
-                continue                      # its partner represents it
-            frac_rows.append([i / n for i, n in zip(idx, mesh)])
-            weights.append((1.0 if idx == partner else 2.0) / ntot)
-        kpts = np.asarray(frac_rows) @ recip
-        return kpts, np.asarray(weights)
+        frac = idx[keep] / mesh_a
+        weights = np.where(flat[keep] == partner[keep], 1.0, 2.0) / ntot
+        kpts = frac @ recip
+        return kpts, weights
+
+    @property
+    def reciprocal_vectors(self) -> np.ndarray:
+        """Reciprocal lattice vectors as rows (1/Angstrom), with
+        b_i . a_j = 2 pi delta_ij (new in 0.14.0).  For a cell with fewer
+        lattice vectors than Cartesian dimensions (a ribbon, say) they
+        lie in the span of the lattice vectors."""
+        if self.cell is None:
+            raise ValueError("finite system has no reciprocal lattice")
+        c = self.cell
+        if c.shape[0] == c.shape[1]:
+            return 2.0 * np.pi * np.linalg.inv(c).T
+        return 2.0 * np.pi * np.linalg.pinv(c).T
 
     @property
     def cell_volume(self) -> float:
-        """Length / area / volume of the unit cell (Angstrom^dim)."""
+        """Length / area / volume of the unit cell (Angstrom^p for p
+        lattice vectors)."""
         if self.cell is None:
             raise ValueError("finite system has no cell")
         c = self.cell
         if c.shape == (1, 1):
             return float(abs(c[0, 0]))
-        if c.shape == (2, 2):
-            return float(abs(np.linalg.det(c)))
+        if c.shape[0] != c.shape[1]:
+            # fewer lattice vectors than dimensions (since 0.14.0): the
+            # length, area or volume they span, sqrt(det(C C^T))
+            return float(np.sqrt(abs(np.linalg.det(c @ c.T))))
         return float(abs(np.linalg.det(c)))

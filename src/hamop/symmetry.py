@@ -91,15 +91,23 @@ def symmetry_fold(model: TightBindingModel,
     """
     if model.cell is None:
         raise ValueError("finite system has no Brillouin zone")
+    _need_square_cell(model, "symmetry_fold")
     dim = model.cell.shape[0]
     if np.isscalar(mesh):
         mesh = (int(mesh),) * dim
+    mesh = tuple(int(n) for n in mesh)
+    if len(mesh) != dim or min(mesh) < 1:
+        raise ValueError(f"mesh must give {dim} positive point count(s), "
+                         f"one per lattice vector; got {mesh}")
+    # A one-shot iterable (a generator) would be used up by the first
+    # loop below; before 0.14.0 the spectral check then saw no
+    # operations and a non-symmetry was folded without a check.
+    ops = [np.asarray(R, dtype=float) for R in ops]
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
     Binv = np.linalg.inv(recip)
 
     frac_mats = []
     for R in ops:
-        R = np.asarray(R, dtype=float)
         if R.shape != (dim, dim):
             raise ValueError(f"operation must be {dim} x {dim}")
         M = recip @ R.T @ Binv            # action on fractional rows
@@ -113,7 +121,7 @@ def symmetry_fold(model: TightBindingModel,
     # spectral verification at random k, for every supplied op (and -k)
     rng = np.random.default_rng(seed)
     ktest = rng.uniform(-1.0, 1.0, size=(n_check, dim)) @ recip
-    checks = [np.asarray(R, dtype=float) for R in ops]
+    checks = list(ops)
     if time_reversal:
         checks.append(-np.eye(dim))
     for R in checks:
@@ -129,44 +137,60 @@ def symmetry_fold(model: TightBindingModel,
     group = _group_closure(frac_mats)
     if time_reversal:
         group = group + [-g for g in group]
+    return _fold_grid(group, mesh, recip)
 
+
+def _fold_grid(group, mesh, recip):
+    """Orbit representatives and weights of the grid points idx / mesh
+    under a group of integer fractional matrices.
+
+    A grid point with fractional coordinates f_e = idx_e / mesh_e maps to
+    f' = f g, i.e. to the grid index idx'_d = sum_e idx_e g_ed mesh_d /
+    mesh_e, which must be an integer for every point.  This is evaluated
+    in exact integer arithmetic.  Before 0.14.0 the index vector itself
+    was multiplied by g, which is the same thing only when all mesh_e
+    are equal; with an uneven mesh such as (8, 4) a fold by C4 that moves
+    points off the grid was not refused and gave wrong weights (the
+    square lattice's DOS at 0.5 eV came out 0.0422 instead of 0.0729).
+    The representative of an orbit is its member with the smallest flat
+    (C-order) index, and orbits are listed in the order of their first
+    member, as before; for an even mesh the points, order and weights
+    are the same as before (the tests compare with the old loop: weights
+    exactly, k-points to 1e-13)."""
+    dim = len(mesh)
+    mesh_a = np.asarray(mesh, dtype=np.int64)
     ntot = int(np.prod(mesh))
-    mesh = tuple(int(n) for n in mesh)
-    seen = {}
-    order = []
-    for flat in range(ntot):
-        idx, rest = [], flat
-        for n in reversed(mesh):
-            idx.append(rest % n)
-            rest //= n
-        idx = tuple(reversed(idx))
-        # orbit representative: smallest image under the group
-        images = []
-        v = np.array(idx, dtype=float)
-        ok = True
-        for g in group:
-            w = v @ g
-            # images must land back on the grid
-            wi = tuple(int(np.rint(w[d])) % mesh[d] for d in range(dim))
-            if np.abs(np.array([w[d] % mesh[d] for d in range(dim)])
-                      - np.array(wi)).max() > 1e-6:
-                ok = False
-                break
-            images.append(wi)
-        if not ok:
+    L = int(np.lcm.reduce(mesh_a))
+    idx = np.indices(mesh, dtype=np.int64).reshape(dim, -1).T
+    scaled = idx * (L // mesh_a)                 # idx_e * L / mesh_e
+    rep = np.full(ntot, ntot, dtype=np.int64)
+    for g in group:
+        gi = np.rint(np.asarray(g)).astype(np.int64)
+        num = (scaled @ gi) * mesh_a             # L * idx'_d
+        if np.any(num % L != 0):
             raise ValueError("group operation moves grid points off the "
                              "grid; choose a mesh compatible with the "
                              "symmetry")
-        rep = min(images)
-        if rep in seen:
-            seen[rep] += 1
-        else:
-            seen[rep] = 1
-            order.append(rep)
-    frac = np.array([[i / n for i, n in zip(rep, mesh)] for rep in order])
+        image = (num // L) % mesh_a
+        rep = np.minimum(rep, np.ravel_multi_index(image.T, mesh))
+    reps, first, counts = np.unique(rep, return_index=True,
+                                    return_counts=True)
+    order = np.argsort(first, kind="stable")
+    reps, counts = reps[order], counts[order]
+    rep_idx = np.stack(np.unravel_index(reps, mesh), axis=-1)
+    frac = rep_idx / mesh_a
     kpts = frac @ recip
-    weights = np.array([seen[rep] for rep in order], dtype=float) / ntot
+    weights = counts.astype(float) / ntot
     return kpts, weights
+
+
+def _need_square_cell(model, name):
+    if model.cell.shape[0] != model.cell.shape[1]:
+        raise ValueError(
+            f"{name} needs as many lattice vectors as Cartesian "
+            "dimensions; for a model periodic in fewer directions (a "
+            "ribbon) use the full grid or monkhorst_pack(..., "
+            "time_reversal=True)")
 
 
 def find_point_group(model: TightBindingModel, n_check: int = 4,
@@ -191,6 +215,7 @@ def find_point_group(model: TightBindingModel, n_check: int = 4,
     """
     if model.cell is None:
         raise ValueError("finite system has no point group in k")
+    _need_square_cell(model, "find_point_group")
     cell = model.cell
     dim = cell.shape[0]
     G = cell @ cell.T                     # lattice Gram matrix

@@ -85,6 +85,51 @@ def _projector(model, k, n_occ, gap_min):
     return vo @ vo.conj().T
 
 
+def _projectors_many(model, K, n_occ, gap_min):
+    """`_projector` at every row of K, shape (nk, nao, nao)."""
+    if model.has_overlap():
+        raise ValueError(
+            "quantum geometry with orbital overlaps is not "
+            "implemented (nonorthogonal bases need S-weighted inner "
+            "products); orthogonalize the model first")
+    H, _ = model._bloch_many(K)
+    e, v = np.linalg.eigh(H)
+    if n_occ < 1 or n_occ >= e.shape[1]:
+        raise ValueError(f"n_occ must lie in [1, {e.shape[1] - 1}]")
+    gap = e[:, n_occ] - e[:, n_occ - 1]
+    bad = int(np.argmin(gap))
+    if gap[bad] < gap_min:
+        raise ValueError(
+            f"the gap between occupied and empty states is {gap[bad]:.3g} "
+            f"(< gap_min = {gap_min:.3g}) at k = {list(K[bad])}: the "
+            "occupied projector is not smooth across a band "
+            "crossing, so the quantum geometry there is undefined")
+    vo = v[:, :, :n_occ]
+    return vo @ np.conj(np.swapaxes(vo, 1, 2))
+
+
+def _qgt_many(model, K, n_occ, delta, gap_min):
+    """`quantum_geometric_tensor` at every row of K, shape (nk, dim,
+    dim)."""
+    dim = K.shape[1]
+    dP = []
+    for a in range(dim):
+        Kp, Km = K.copy(), K.copy()
+        Kp[:, a] += delta
+        Km[:, a] -= delta
+        dP.append((_projectors_many(model, Kp, n_occ, gap_min)
+                   - _projectors_many(model, Km, n_occ, gap_min))
+                  / (2.0 * delta))
+    P = _projectors_many(model, K, n_occ, gap_min)
+    one_m_P = np.eye(P.shape[1]) - P
+    Q = np.empty((K.shape[0], dim, dim), dtype=complex)
+    for a in range(dim):
+        for b in range(dim):
+            Q[:, a, b] = np.trace(dP[a] @ one_m_P @ dP[b] @ P, axis1=1,
+                                  axis2=2)
+    return Q
+
+
 def quantum_geometric_tensor(model: TightBindingModel, k: ArrayLike,
                              n_occ: int = 1, delta: float = 1e-5,
                              gap_min: float = 1e-8) -> np.ndarray:
@@ -143,12 +188,13 @@ def quantum_weight(model: TightBindingModel, mesh: int = 24, n_occ: int = 1,
                          "zone; the model must be periodic in 2D")
     kpts, w = model.monkhorst_pack(mesh)
     a_bz = (2.0 * np.pi) ** 2 / model.cell_volume
-    K = np.zeros((2, 2))
-    c = 0.0
-    for kp, wi in zip(kpts, w):
-        Q = quantum_geometric_tensor(model, kp, n_occ, delta, gap_min)
-        K += wi * np.real(Q)
-        c += wi * (2.0 * np.imag(Q[0, 1]))
+    # all k-points at once (since 0.14.0): the same projectors and finite
+    # differences as `quantum_geometric_tensor`, in blocks of k-points
+    Q = np.concatenate([_qgt_many(model, kpts[s:s + 4096], n_occ, delta,
+                                  gap_min)
+                        for s in range(0, len(kpts), 4096)])
+    K = np.einsum("k,kab->ab", w, np.real(Q))
+    c = float(w @ (2.0 * np.imag(Q[:, 0, 1])))
     K *= a_bz / (2.0 * np.pi)
     chern = c * a_bz / (2.0 * np.pi)
     return {"K": K, "chern": float(chern),

@@ -43,7 +43,7 @@ from numpy.typing import ArrayLike
 from scipy.optimize import brentq
 
 from .model import E_CHARGE, KB, check_kgrid, fermi_dirac
-from .spectrum import _eigs
+from .spectrum import _eig_rows, _flat_states, _is_ragged
 
 if TYPE_CHECKING:
     from .model import TightBindingModel
@@ -66,12 +66,18 @@ def _setup(model, n_neutral, mesh, kpts, weights, spin, thresh):
         kpts, weights = check_kgrid(kpts, weights)
     else:
         raise ValueError("periodic model: give mesh or kpts")
-    eigs = _eigs(model, kpts, thresh)
-    if eigs.ndim != 2:
-        raise ValueError("the overlap matrix drops states at some k-points "
-                         "(canonical orthogonalization); a density needs "
-                         "the same number of bands everywhere")
-    n_full = spin * eigs.shape[1]
+    rows = _eig_rows(model, kpts, thresh)
+    if not _is_ragged(rows):
+        eigs = np.array(rows)
+        n_full = spin * eigs.shape[1]
+    else:
+        # canonical orthogonalization drops states at some k-points, so
+        # the band count changes with k.  Before 0.14.0 this was meant to
+        # be refused but raised a NumPy "inhomogeneous shape" error; the
+        # states are now counted one by one with their k-point weights.
+        eigs, wv = _flat_states(rows, weights)
+        weights = wv
+        n_full = spin * float(wv.sum())
     n_neutral = float(n_neutral)
     if not 0.0 <= n_neutral <= n_full:
         raise ValueError(f"n_neutral must lie in [0, {n_full:g}] electrons "
@@ -83,8 +89,11 @@ def _setup(model, n_neutral, mesh, kpts, weights, spin, thresh):
 
 
 def _density(eigs, w, mu, T, spin, n_neutral, scale):
-    return (spin * float(w @ fermi_dirac(eigs, mu, T).sum(axis=1))
-            - n_neutral) * scale
+    """eigs (nk, nb) with k weights w (nk,), or (since 0.14.0) all states
+    as one 1D array with one weight per state."""
+    f = fermi_dirac(eigs, mu, T)
+    occ = w @ f.sum(axis=1) if eigs.ndim == 2 else w @ f
+    return (spin * float(occ) - n_neutral) * scale
 
 
 def _mdfde(eigs, mu, T):
@@ -179,7 +188,7 @@ def chemical_potential_from_density(
                             maxiter=500))
 
     mu = solve(density)
-    terms = w[:, None] * _mdfde(eigs, mu, T)
+    terms = (w[:, None] if eigs.ndim == 2 else w) * _mdfde(eigs, mu, T)
     total = float(terms.sum())
     if not total > 0 or float(terms.max()) > max_share * total:
         raise ValueError(

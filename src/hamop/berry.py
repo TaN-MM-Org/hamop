@@ -228,10 +228,144 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
     :func:`berry_phase`; in the atomic frame the wrapped boundary
     points are evaluated explicitly rather than identified modulo the
     zone.
+
+    Since 0.14.0 the dense solver assembles and diagonalizes all grid
+    points at once and takes the link determinants as array operations
+    (the same links as before; the fluxes agree with the former
+    point-by-point loop to rounding, 1e-12 in the tests).
     """
     if model.cell is None or model.cell.shape != (2, 2):
         raise ValueError("berry_curvature needs a 2D periodic model")
     N = int(mesh)
+    if N < 1:
+        raise ValueError("mesh must be a positive number of points")
+    if frame not in ("lowdin", "atomic"):
+        raise ValueError("frame must be 'lowdin' or 'atomic'")
+    if not 1 <= int(n_occ) <= model.nao:
+        raise ValueError(f"n_occ must lie in [1, {model.nao}] (the number "
+                         "of bands of this model)")
+    if solver != "dense":
+        return _berry_curvature_loop(model, N, n_occ, frame, solver)
+    recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
+    b1, b2 = recip[0], recip[1]
+    n_pts = N if frame == "lowdin" else N + 1
+    ii, jj = np.meshgrid(np.arange(n_pts), np.arange(n_pts), indexing="ij")
+    K = ((ii / N)[..., None] * b1 + (jj / N)[..., None] * b2).reshape(-1, 2)
+    st = _states_many(model, K, int(n_occ), frame)
+    st = st.reshape(n_pts, n_pts, model.nao, int(n_occ))
+    Kg = K.reshape(n_pts, n_pts, 2)
+    if frame == "lowdin":
+        def at(di, dj):                  # periodic: index modulo N
+            return np.roll(st, (-di, -dj), axis=(0, 1))
+
+        def kat(di, dj):
+            return np.roll(Kg, (-di, -dj), axis=(0, 1))
+    else:
+        def at(di, dj):
+            return st[di:di + N, dj:dj + N]
+
+        def kat(di, dj):
+            return Kg[di:di + N, dj:dj + N]
+    corners = [(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)]
+    prod = None
+    for (a0, a1), (c0, c1) in zip(corners[:-1], corners[1:]):
+        u = _links_many(model, frame, kat(a0, a1), at(a0, a1),
+                        kat(c0, c1), at(c0, c1))
+        prod = u if prod is None else prod * u
+    return np.angle(prod).astype(float)
+
+
+def _bloch_periodic_many(model, K):
+    """`_bloch_periodic` for every row of K: (nk, n, n) H and S, the
+    same blocks and Hermitization, assembled with one array operation
+    per block (new in 0.14.0)."""
+    nk, n = K.shape[0], model.nao
+    H = np.zeros((nk, n, n), dtype=complex)
+    S = np.zeros((nk, n, n), dtype=complex)
+    overlap = model.has_overlap()
+    for i, j, image, Hb, Sb in model._hops:
+        oi, oj = model.offsets[i], model.offsets[j]
+        R = np.asarray(image, dtype=float) @ model.cell
+        ph = np.exp(1j * (K @ R))[:, None, None]
+        ni, nj = Hb.shape
+        onsite = (i == j) and not any(image)
+        if Sb is None:
+            Sb = np.zeros_like(Hb)
+        H[:, oi:oi + ni, oj:oj + nj] += ph * Hb
+        S[:, oi:oi + ni, oj:oj + nj] += ph * Sb
+        if not onsite:
+            H[:, oj:oj + nj, oi:oi + ni] += np.conj(ph) * Hb.conj().T
+            S[:, oj:oj + nj, oi:oi + ni] += np.conj(ph) * Sb.conj().T
+    if overlap:
+        given = model._onsite_S_given()
+        for i in range(len(model.norb)):
+            if i not in given:
+                oi = model.offsets[i]
+                S[:, oi:oi + model.norb[i], oi:oi + model.norb[i]] += \
+                    np.eye(model.norb[i], dtype=complex)
+        S = 0.5 * (S + np.conj(np.swapaxes(S, 1, 2)))
+    else:
+        S = None
+    return 0.5 * (H + np.conj(np.swapaxes(H, 1, 2))), S
+
+
+def _states_many(model, K, n_occ, frame):
+    """The occupied frames of `_get_states` (dense solver) at every row
+    of K, shape (nk, nao, n_occ), in blocks of k-points that keep the
+    stacked matrices near 16 MB."""
+    size = max(1, (1 << 20) // max(1, model.nao * model.nao))
+    if K.shape[0] <= size:
+        return _states_block(model, K, n_occ, frame)
+    return np.concatenate([_states_block(model, K[s:s + size], n_occ, frame)
+                           for s in range(0, K.shape[0], size)])
+
+
+def _states_block(model, K, n_occ, frame):
+    if frame == "lowdin":
+        H, S = _bloch_periodic_many(model, K)
+    else:
+        H, S = model._bloch_many(K)
+    if S is None:
+        return np.linalg.eigh(H)[1][:, :, :n_occ]
+    w, V = np.linalg.eigh(S)
+    if frame == "lowdin" and w.min() <= 1e-10:
+        raise ValueError(
+            "berry: S(k) is not positive definite at some k "
+            f"(min overlap eigenvalue {w.min():.3e}); the Loewdin frame "
+            "is undefined for an (over)complete basis here")
+    if w.min() > 1e-10:                  # canonical orthogonalization
+        X = V / np.sqrt(w)[:, None, :]   # keeps every direction
+        Hp = np.conj(np.swapaxes(X, 1, 2)) @ H @ X
+        c = (X @ np.linalg.eigh(Hp)[1])[:, :, :n_occ]
+    else:                                # atomic frame, dropped states
+        c = np.array([gen_eigh(H[i], S[i], eigvals_only=False)[1][:, :n_occ]
+                      for i in range(K.shape[0])])
+    if frame == "atomic":
+        return c
+    # Loewdin map d = S^(1/2) c
+    return (V * np.sqrt(w)[:, None, :]) @ (np.conj(np.swapaxes(V, 1, 2))
+                                            @ c)
+
+
+def _links_many(model, frame, k_from, s_from, k_to, s_to):
+    """`_link` for arrays of k-point pairs (leading axes broadcast)."""
+    sh = np.conj(np.swapaxes(s_from, -1, -2))
+    if frame == "atomic" and model.has_overlap():
+        km = 0.5 * (k_from + k_to)
+        d = np.empty(km.shape[:-1], dtype=complex)
+        for i in range(km.shape[0]):           # one grid row at a time
+            _, Smid = model._bloch_many(km[i])
+            d[i] = np.linalg.det(sh[i] @ Smid @ s_to[i])
+    else:
+        d = np.linalg.det(sh @ s_to)
+    if np.any(np.abs(d) < 1e-12):
+        raise ValueError("vanishing link overlap; refine the grid")
+    return d / np.abs(d)
+
+
+def _berry_curvature_loop(model, N, n_occ, frame, solver):
+    """One k-point at a time (the form used for every solver before
+    0.14.0; kept for solver="sparse")."""
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
     b1, b2 = recip[0], recip[1]
     if frame == "lowdin":
@@ -246,7 +380,7 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
 
         def S(i, j):
             return st[i % N][j % N]
-    elif frame == "atomic":
+    else:
         kg = [[(i / N) * b1 + (j / N) * b2 for j in range(N + 1)]
               for i in range(N + 1)]
         st = [[_get_states(model, kg[i][j], n_occ, frame, solver)
@@ -257,8 +391,6 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
 
         def S(i, j):
             return st[i][j]
-    else:
-        raise ValueError("frame must be 'lowdin' or 'atomic'")
 
     F = np.empty((N, N))
     for i in range(N):

@@ -103,6 +103,9 @@ def sigma_optical(model: TightBindingModel, omega: ArrayLike, mu: float,
     direction: Cartesian polarization axis.  For a finite system
     (cell=None) the "cell volume" is absent and the result is the
     conductivity times the system area; divide by your geometric area.
+    For a model with fewer lattice vectors than dimensions (a ribbon,
+    since 0.14.0) the sum is divided by the length of the cell instead
+    of an area (unit e^2/(4 hbar) times Angstrom), as for a 1D chain.
     """
     omega = np.atleast_1d(np.asarray(omega, dtype=float))
     if np.any(omega <= 0):

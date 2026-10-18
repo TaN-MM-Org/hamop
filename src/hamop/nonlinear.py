@@ -63,6 +63,14 @@ def _dfermi_deps(e, mu, kT):
     return -1.0 / (4.0 * kT * np.cosh(x) ** 2)
 
 
+def _centers(N, b1, b2):
+    """Plaquette centers ((i + 1/2)/N) b1 + ((j + 1/2)/N) b2 in the
+    order i outer, j inner, shape (N^2, 2)."""
+    ii, jj = np.meshgrid(np.arange(N), np.arange(N), indexing="ij")
+    return (((ii + 0.5) / N)[..., None] * b1
+            + ((jj + 0.5) / N)[..., None] * b2).reshape(-1, 2)
+
+
 def band_curvatures(model: TightBindingModel, mesh: int,
                     solver: str = "dense"
                     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -102,12 +110,10 @@ def band_curvatures(model: TightBindingModel, mesh: int,
     a_bz = abs(b1[0] * b2[1] - b1[1] * b2[0])
     a_plaq = a_bz / N ** 2
     nb = model.nao
-    energies = np.empty((N, N, nb))
-    for i in range(N):
-        for j in range(N):
-            k = ((i + 0.5) / N) * b1 + ((j + 0.5) / N) * b2
-            H, _ = model.bloch(k)
-            energies[i, j] = np.linalg.eigvalsh(H)
+    # plaquette centers, all at once (since 0.14.0; same matrices as the
+    # former point-by-point loop, eigenvalues equal to rounding)
+    H, _ = model._bloch_many(_centers(N, b1, b2))
+    energies = np.linalg.eigvalsh(H).reshape(N, N, nb)
     F = np.zeros((N, N, nb))
     below = np.zeros((N, N))
     for n in range(nb - 1):
@@ -164,15 +170,14 @@ def berry_dipole(model: TightBindingModel, mesh: int, mu: float, kT: float,
                              "function and needs kT > 0")
         dfde = _dfermi_deps(energies, mu, kT)
         vel = np.empty((N, N, nb, 2))
-        for i in range(N):
-            for j in range(N):
-                k = ((i + 0.5) / N) * b1 + ((j + 0.5) / N) * b2
-                H, _ = model.bloch(k)
-                _, U = np.linalg.eigh(H)
-                for a in range(2):
-                    dH, _ = model.bloch_derivative(k, direction=a)
-                    vel[i, j, :, a] = np.real(
-                        np.einsum("in,ij,jn->n", U.conj(), dH, U))
+        K = _centers(N, b1, b2)
+        H, _ = model._bloch_many(K)
+        _, U = np.linalg.eigh(H)
+        Uh = np.conj(np.swapaxes(U, 1, 2))
+        for a in range(2):
+            dH, _ = model._bloch_many(K, a)
+            v = np.real(np.diagonal(Uh @ dH @ U, axis1=1, axis2=2))
+            vel[:, :, :, a] = v.reshape(N, N, nb)
         for n in range(nb):
             for a in range(2):
                 per_band[n, a] = -(omega[:, :, n] * dfde[:, :, n]
