@@ -18,7 +18,8 @@ computes:
 - how easily electrons pass through a small device placed between two
   wires (the **transmission**), and from it the conductance, current
   and thermovoltage a measurement at a given temperature would report;
-- topological numbers such as the **Chern number**, and related
+- topological numbers such as the **Chern number** and, for crystals
+  with time-reversal symmetry, the **Z2 index**, and related
   geometric quantities of the electron states;
 - for your own measurements: model parameters fitted to measured band
   energies with error bars, error bars for anything computed from
@@ -59,6 +60,7 @@ material come from your own calculation or measurement.
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
 - [How the results are checked](#how-the-results-are-checked)
+- [What changed in 0.15.0](#what-changed-in-0150)
 - [What changed in 0.14.0](#what-changed-in-0140)
 - [What changed in 0.13.0](#what-changed-in-0130)
 - [What changed in 0.12.0](#what-changed-in-0120)
@@ -149,6 +151,18 @@ material come from your own calculation or measurement.
   states change as `k` moves. The Chern number is a whole number that
   cannot change unless a band gap closes. It sets the quantized Hall
   conductivity `C e^2/h`.
+- **Z2 index, quantum spin Hall insulator** -- in a crystal with
+  time-reversal symmetry (no magnetic field, no magnetic order) the
+  Chern number is always zero. The topological number is then the Z2
+  index: 1 for a quantum spin Hall insulator, whose edges carry
+  conducting states although its inside is insulating, and 0 for an
+  ordinary insulator. Like the Chern number, it cannot change unless
+  a band gap closes.
+- **Hybrid Wannier center** -- the average position, along one lattice
+  direction, of an electron state that is localized along that
+  direction and spread out along the other. How these centers move as
+  the other component of `k` changes gives both the Chern number and
+  the Z2 index.
 - **Quantum metric** -- how fast the occupied electron states change
   as `k` moves; the Berry curvature is its partner.
 - **Kernel polynomial method (KPM)** -- a way to get the DOS and the
@@ -184,7 +198,14 @@ Units and conventions, stated once:
   term on top.
 - Magnetic flux for `with_peierls` is given per square Angstrom, in
   units of the flux quantum; `magnetic_supercell` takes the flux
-  `p/q` per unit cell.
+  `p/q` per unit cell. A positive flux is a field along +z in both,
+  whatever the order of the lattice vectors (since 0.15.0).
+- Berry curvature and Chern numbers are taken counterclockwise in the
+  Cartesian (k_x, k_y) plane, whatever the order of the lattice
+  vectors (since 0.15.0). `berry_phase` returns the phase of the
+  product of the overlaps of neighboring states around the loop. That
+  is minus Berry's phase (the integral of `i <u|du/dk>` along the
+  loop); quantized values such as 0 and pi are the same either way.
 - Temperature `T = 0` means the exact step occupation; a level exactly
   at `mu` counts as half occupied (the value the Fermi function has at
   `mu` for every `T > 0`).
@@ -201,7 +222,7 @@ Units and conventions, stated once:
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with hamop 0.14.0. The model parameters are illustrative
+printed with hamop 0.15.0. The model parameters are illustrative
 values, not fitted to any material, unless the text says otherwise.
 
 ### 1. Graphene: bands and the absorption plateau
@@ -762,6 +783,51 @@ while nothing conducts across it in `boltzmann_transport`. Before
 0.14.0 such a model was accepted, but every function given `mesh=`
 failed with a NumPy error.
 
+### 15. A quantum spin Hall insulator: the Z2 index
+
+```python
+import numpy as np
+from hamop import kane_mele, haldane, chern_number, z2_invariant
+
+lam_so = 0.06                          # spin-orbit coupling, eV (t1 = -1 eV)
+print(f"gap closes at lam_v = 3 sqrt(3) lam_so = {3 * np.sqrt(3) * lam_so:.4f} eV")
+for lam_v in (0.1, 0.5):               # staggered sublattice energy, eV
+    # without Rashba, S_z is conserved: two Haldane copies, one per spin
+    up = round(chern_number(haldane(t2=lam_so, phi=np.pi / 2, m_ab=lam_v)))
+    down = round(chern_number(haldane(t2=lam_so, phi=-np.pi / 2, m_ab=lam_v)))
+    for lam_r in (0.0, 0.05):          # Rashba coupling, eV
+        m = kane_mele(lam_so=lam_so, lam_v=lam_v, lam_r=lam_r)
+        z2 = z2_invariant(m, n_occ=2)["z2"]
+        note = f"   (spin Chern numbers {up:+d}, {down:+d})" if lam_r == 0 else ""
+        print(f"lam_v = {lam_v}, lam_r = {lam_r}: Z2 = {z2}{note}")
+```
+
+```
+gap closes at lam_v = 3 sqrt(3) lam_so = 0.3118 eV
+lam_v = 0.1, lam_r = 0.0: Z2 = 1   (spin Chern numbers +1, -1)
+lam_v = 0.1, lam_r = 0.05: Z2 = 1
+lam_v = 0.5, lam_r = 0.0: Z2 = 0   (spin Chern numbers +0, +0)
+lam_v = 0.5, lam_r = 0.05: Z2 = 0
+```
+
+The Kane-Mele model is graphene with spin-orbit coupling `lam_so`
+(Kane and Mele, Phys. Rev. Lett. 95, 226801 and 146802 (2005)). Time
+reversal makes its Chern number zero, so `chern_number` cannot tell
+its two phases apart. `z2_invariant` can. Without the Rashba term
+`lam_r` each spin is a copy of the Haldane model of example 3, and
+the Z2 index is half the difference of the two spin Chern numbers,
+mod 2: 1 below `lam_v = 3 sqrt(3) lam_so`, where the gap closes, and
+0 above. The Rashba term mixes the two spins, so the spin Chern
+numbers no longer exist, but the Z2 index still does, and here it
+keeps its value because the gap stays open.
+
+`z2_invariant` follows the hybrid Wannier centers
+(`hybrid_wannier_centers`) across half the Brillouin zone and counts
+how often they cross the largest gap between them (Soluyanov and
+Vanderbilt, Phys. Rev. B 83, 235401 (2011)). It adds k-lines where the
+centers move too fast, and it refuses a model without time-reversal
+symmetry, an odd number of occupied bands, or bands that touch.
+
 ## Tutorials
 
 Three scripts in `examples/` carry a complete analysis from data to a
@@ -907,6 +973,15 @@ gives its inputs, units and conventions.
   with few occupied bands.
 - `chern_marker` -- the local Chern marker of a finite 2D model
   (Bianco and Resta, Phys. Rev. B 84, 241106(R) (2011)).
+- `hybrid_wannier_centers`, `z2_invariant` (new in 0.15.0) -- the
+  eigenvalues of the Wilson loop of the occupied bands as hybrid
+  Wannier centers, and from their flow the Z2 index of a 2D crystal
+  with time-reversal symmetry (Kane and Mele, Phys. Rev. Lett. 95,
+  146802 (2005); method of Soluyanov and Vanderbilt, Phys. Rev. B 83,
+  235401 (2011), and Yu, Qi, Bernevig, Fang and Dai, Phys. Rev. B 84,
+  075119 (2011); its refinement checks are of the kind used by the
+  Z2Pack code, Gresch et al., Phys. Rev. B 95, 075146 (2017)).
+  Example 15. Both handle overlap, in both frames.
 - `berry_dipole`, `band_curvatures`, `fermi_occupation` -- the Berry
   curvature dipole behind the nonlinear Hall effect (Sodemann and Fu,
   Phys. Rev. Lett. 115, 216806 (2015)), computed in two independent
@@ -922,7 +997,9 @@ gives its inputs, units and conventions.
 
 - `with_spin` -- a spinful copy of a model; `PAULI` -- the Pauli
   matrices, for adding Zeeman or spin-orbit terms; `kane_mele` -- the
-  Kane-Mele model (Kane and Mele, Phys. Rev. Lett. 95, 226801 (2005)).
+  Kane-Mele model (Kane and Mele, Phys. Rev. Lett. 95, 226801 (2005)),
+  since 0.15.0 with the optional Rashba (`lam_r`) and staggered
+  (`lam_v`) terms of Kane and Mele, Phys. Rev. Lett. 95, 146802 (2005).
 - `with_peierls` -- a uniform magnetic field on a finite model, by
   Peierls substitution: each hopping gets a phase set by the magnetic
   flux (Peierls, Z. Phys. 80, 763 (1933)).
@@ -1152,11 +1229,22 @@ doubtful number, when:
 - `bands` is asked for a model whose number of bands changes with `k`
   (overlap directions dropped at some k-points), which cannot form one
   array; `dos`, `fermi_level`, `band_edges`, `carrier_count` and
-  `carrier_density` handle such models.
+  `carrier_density` handle such models;
+- `berry_phase` is given a `closure` that is not a reciprocal lattice
+  vector, so the loop is not closed (since 0.15.0);
+- `z2_invariant` gets a model without two lattice vectors, an odd
+  `n_occ`, a model whose Wannier centers show no time-reversal
+  symmetry (no Kramers pairs on the two lines of `k` that time
+  reversal maps onto themselves, or different centers at `k` and `-k`;
+  two spin copies of a Chern insulator are refused this way), or a
+  flow of centers it cannot follow within `max_lines` lines;
+  `z2_invariant` and `hybrid_wannier_centers` refuse occupied and
+  empty bands closer than `gap_min` at a sampled k-point (the centers
+  are undefined there) and an `n_occ` that leaves no empty band.
 
 ## How the results are checked
 
-253 automated tests run on every change, on Python 3.9, 3.10, 3.11,
+275 automated tests run on every change, on Python 3.9, 3.10, 3.11,
 3.12, 3.13 and 3.14, and once more on Python 3.10 with the oldest
 NumPy (1.22.0) and SciPy (1.8.0) the package allows. The numerical
 tests compare the package with a closed-form result, a symmetry, or a
@@ -1237,6 +1325,18 @@ tolerances the tests use:
   1e-4 relative; `tr g >= 2 sqrt(det g) >= |Omega|` holds at 25 random
   points per phase; the integrated Chern number is within 0.02 of the
   lattice one; `tr K >= |C|` holds in both phases.
+- Listing the two lattice vectors of a crystal in the other order
+  changes nothing (0.15.0): the Haldane model's Chern number stays 1 in
+  both frames and with the sparse solver, matching `sigma_xy` to 1e-6;
+  its plaquette fluxes are the same set to 1e-12; the Berry curvature
+  dipole of strained gapped graphene is the same vector to 1e-10
+  relative, by both integral forms.
+- `berry_phase` with a closing reciprocal vector gives the same phase,
+  to 1e-10, wherever the loop starts, in both frames, and in the atomic
+  frame it equals an independent construction from periodic-gauge
+  eigenvectors (0.15.0). Its sign is pinned to the spin-1/2 case: the
+  exact phase of the discrete loop to 1e-10, and `pi (1 - cos theta)`
+  to 1e-4 for 400 points.
 
 **Magnetic fields and spin**
 
@@ -1253,6 +1353,18 @@ tolerances the tests use:
 - Spin doubling gives doublets to 1e-12, and a Zeeman term splits
   them by `2B` to 1e-12. With overlap, the Zeeman-split bands equal
   `(2t cos ka -/+ B)/(1 + 2s cos ka)` to 1e-12.
+- A positive flux is a field along +z in `with_peierls` and in
+  `magnetic_supercell`, for either order of the lattice vectors: the
+  phase around a counterclockwise unit square is `+2 pi p/q` to 1e-12,
+  and both orders give the Chern number -1 and the same `sigma_xy`
+  within 1e-3 at flux 1/3 (0.15.0).
+- `kane_mele` with its default arguments builds exactly the blocks of
+  0.14.0. With `lam_v` it equals two Haldane copies to 1e-12, and the
+  smaller of its gaps at K and K' is `2 |3 sqrt(3) lam_so - |lam_v||`
+  to 1e-12. With `lam_r` each Rashba block equals `i lam_r (s x d)_z`
+  for the bond direction `d` to 1e-15, time reversal holds to 1e-12,
+  the bands form Kramers pairs at the four time-reversal-invariant
+  momenta to 1e-12, and S_z is no longer conserved.
 
 **Transport**
 
@@ -1304,6 +1416,35 @@ tolerances the tests use:
   `2 T(mu)` of the closed form to 1e-5 and `I/V` at a 0.1 mV bias
   matches `G` to 1e-6 relative; a band-edge step matches
   `2 [f(-2|t|) - f(2|t|)]` to 1e-4 on a 1e-5 eV grid.
+
+**Wannier centers and the Z2 index (0.15.0)**
+
+- A band made of one orbital has its hybrid Wannier center on that
+  orbital, at (0.3, 0.6) of an oblique cell, to 1e-12 (atomic frame),
+  and at 0 in the periodic frame; the SSH chain's center sits at the
+  middle of the strong bond, 1/4 or 3/4 of the cell, to 1e-9.
+- -2 pi times the sum of the centers equals `berry_phase` along the
+  same loop to 1e-10 (mod 2 pi), for one and two occupied bands, with
+  overlap, in both frames. The winding of the centers across the zone
+  equals `chern_number`, a different algorithm, to 1e-9 for both
+  Haldane phases, both flux signs and both orders of the lattice
+  vectors.
+- The Z2 index of the Kane-Mele model equals half the difference of
+  its two spin Chern numbers, mod 2 (from `chern_number` of the two
+  Haldane copies), at five values of `lam_v` on both sides of
+  `3 sqrt(3) lam_so`, in both frames and along both axes.
+- For a four-band model with inversion symmetry it equals the parity
+  index of Fu and Kane (Phys. Rev. B 76, 045302 (2007)), computed from
+  the parity eigenvalues at four momenta, on both sides of each of the
+  model's three gap closings, with and without a term that mixes the
+  spins.
+- Along paths of growing Rashba coupling (up to 0.06 eV) on which the
+  gap stays above 0.05 eV it keeps its value, 1 and 0. Two copies of a
+  quantum spin Hall insulator give 0 (two crossings), one copy next to
+  an ordinary insulator 1 (one crossing); coarse starting grids give
+  the same result after refinement; a nearest-neighbor overlap of 0.1
+  or 0.2 changes nothing. Models without time reversal, without Kramers
+  pairs, with an odd `n_occ` or without a gap are refused.
 
 **Large systems, k-grids, interpolation, files, fitting**
 
@@ -1413,6 +1554,56 @@ tolerances the tests use:
   lattice matches its closed-form bands to 1e-12 and, built a second
   way as a 2D model with a vacuum cell, gives the same DOS, optics and
   Boltzmann results to 1e-12.
+
+## What changed in 0.15.0
+
+**New**
+
+- `z2_invariant`: the Z2 index of a 2D insulator with time-reversal
+  symmetry, which tells a quantum spin Hall insulator from an ordinary
+  one where the Chern number is zero for both (example 15). It works
+  for any such model, with or without inversion symmetry or a
+  conserved spin, and it checks the time-reversal symmetry and the
+  convergence of its own k-grid. `hybrid_wannier_centers` gives the
+  hybrid Wannier centers it is built from.
+- `kane_mele` takes the Rashba term (`lam_r`) and the staggered
+  sublattice energy (`lam_v`) of the Kane-Mele paper. With the default
+  values (zero) the model is exactly the one of 0.14.0.
+
+**Fixed**
+
+- `chern_number`, `berry_curvature`, `band_curvatures` and
+  `berry_dipole` ran each plaquette loop in the order of the lattice
+  vectors. That is clockwise when the lattice vectors are left-handed
+  (a1 x a2 < 0), so listing the two lattice vectors of the same crystal
+  in the other order flipped every sign. The Haldane model gave a
+  Chern number of -1 while its Hall conductivity is +1 e^2/h, and
+  gapped graphene with a strained bond gave a curvature dipole of
+  (+0.005340, -0.009250) Angstrom instead of (-0.005340, +0.009250).
+  The loops now run counterclockwise in the Cartesian plane. Results
+  for right-handed cells (all the built-in models) are unchanged.
+- `magnetic_supercell` reversed the field for a left-handed cell. For
+  the square lattice at flux 1/3 with its lattice vectors in the order
+  (a2, a1), the phase around a counterclockwise unit square was
+  -2 pi/3 instead of +2 pi/3, and `sigma_xy` with `mu` in the lowest
+  gap came out +1.0000 e^2/h instead of -1.0000. A positive flux is now
+  a field along +z, as in `with_peierls`, for either order.
+  Right-handed cells are unchanged.
+- `berry_phase` with `closure` solved for the states at the end of the
+  loop again, so the arbitrary phase the eigensolver gives each
+  eigenvector entered the result. For the Haldane model with
+  `m_ab = 0.2`, the same loop along b1 gave -1.2113 when started at 0
+  and +1.9302 when started at b1/2 (atomic frame), and +3.0890 instead
+  of -0.0526 in the periodic frame. The end states are now built from
+  the start states, and a `closure` that is not a reciprocal lattice
+  vector is refused.
+
+**Documented**
+
+- The sign of `berry_phase`: it is minus Berry's phase in Berry's own
+  convention, the same convention as the plaquette fluxes whose sum is
+  2 pi times the Chern number. Nothing changed; a test now pins it to
+  the spin-1/2 closed form.
 
 ## What changed in 0.14.0
 
@@ -1670,6 +1861,22 @@ These are deliberate choices, not oversights:
   not implemented).
 - The quantum-geometry functions and the Berry curvature dipole
   handle orthogonal bases only.
+- `chern_number` returns a whole number (to rounding) on any mesh,
+  but it is the right one only when the mesh resolves the Berry
+  curvature and the occupied bands are separated from the empty ones;
+  it does not check the gap.
+  `z2_invariant` and `hybrid_wannier_centers` do check it, but only at
+  the k-points they sample: a gap that closes between two points of a
+  loop is not seen, so check a result by raising `n_k`.
+- `z2_invariant` handles 2D crystals (two lattice vectors). The strong
+  and weak indices of a 3D crystal, which would follow from the Z2
+  index of six planes of its Brillouin zone, are not implemented. Time
+  reversal is checked through what it implies for the Wannier centers
+  (Kramers pairs on the two invariant lines, the same centers at `k`
+  and `-k` on the starting lines); the time-reversal operator itself
+  is not constructed. The thresholds of its refinement checks
+  (`gap_tol`, `move_tol`) are choices made here, not values from the
+  literature.
 - `landauer_conductance`, `landauer_current` and `thermoelectric` take
   `T(E)` as given: a current at finite bias uses the same `T(E)` for
   every bias unless you recompute it (no self-consistent potential
@@ -1721,7 +1928,9 @@ These are deliberate choices, not oversights:
   is taken in the conducting directions only.
 - Models with fewer lattice vectors than dimensions (ribbons) work with
   the bands, DOS, optics, carrier and Boltzmann functions,
-  `berry_phase`, the time-reversal fold and Fourier interpolation.
+  `berry_phase`, `hybrid_wannier_centers`, the time-reversal fold and
+  Fourier interpolation, and a sheet in 3D space (two lattice vectors)
+  works with `z2_invariant`.
   `berry_curvature`, `chern_number`, `band_curvatures`, `berry_dipole`,
   `quantum_weight` and `magnetic_supercell` need a 2D model with two
   lattice vectors, and `symmetry_fold` and `find_point_group` need as

@@ -5,6 +5,128 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## 0.15.0 (2026-11-10)
+
+The Z2 index of 2D insulators with time-reversal symmetry and the
+hybrid Wannier centers it is built from, Rashba and staggered terms for
+the Kane-Mele model, and three bugs fixed: in two of them the order in
+which the lattice vectors were listed changed a sign (Chern numbers and
+curvature dipoles; the field direction of magnetic supercells), in the
+third the eigensolver's arbitrary phase entered `berry_phase` with
+`closure`. No public function was removed or renamed; results of valid
+calls are unchanged except where a bug is fixed below (left-handed
+cells, and `berry_phase` with `closure`).
+
+### Added
+
+- `z2_invariant(model, n_occ, n_k=48, n_lines=11, axis=0,
+  frame="lowdin", max_lines=1025, gap_tol=0.3, move_tol=0.3,
+  tr_tol=1e-6, gap_min=1e-6)` (new module `hamop.wilson`): the Z2 index
+  (C. L. Kane and E. J. Mele, Phys. Rev. Lett. 95, 146802 (2005)) of a
+  2D model with time-reversal symmetry, from the flow of the hybrid
+  Wannier centers over half the Brillouin zone, counted against the
+  middle of the largest gap between them (A. A. Soluyanov and D.
+  Vanderbilt, Phys. Rev. B 83, 235401 (2011); R. Yu, X. L. Qi, A.
+  Bernevig, Z. Fang and X. Dai, Phys. Rev. B 84, 075119 (2011)). Lines
+  are added where the centers move too fast, a check of the kind the
+  Z2Pack code uses (D. Gresch et al., Phys. Rev. B 95, 075146 (2017));
+  its form and thresholds are this package's own. Refused: fewer or
+  more than two lattice vectors, an odd `n_occ` or one that leaves no
+  empty band, no Kramers pairs on the
+  lines s = 0 and 1/2 or different centers at s and 1 - s (no time
+  reversal; two spin copies of a Chern insulator are caught this way),
+  a direct gap below `gap_min` at a sampled k-point, and a flow that
+  cannot be followed within `max_lines` lines. Works with overlap, in
+  both frames, and for a sheet in 3D space. Tests
+  (`tests/test_wilson_z2.py`): the Kane-Mele model against half the
+  difference of its spin Chern numbers from `chern_number` of its two
+  Haldane copies (five values of `lam_v`, both frames and axes); a
+  four-band model with inversion symmetry against the parity index of
+  L. Fu and C. L. Kane, Phys. Rev. B 76, 045302 (2007), from parity
+  eigenvalues at the four time-reversal-invariant momenta (six values of
+  M across three gap closings, with and without a spin-mixing term);
+  constancy along Rashba paths on which the gap stays above 0.05 eV;
+  stacked copies (1 + 1 = 0, two crossings); coarse starting grids,
+  overlaps of 0.1 and 0.2, and every refusal.
+- `hybrid_wannier_centers(model, n_occ, s=None, n_k=48, axis=0,
+  frame="lowdin", gap_min=1e-6)`: the eigenvalues of the Wilson loop
+  (each link replaced by its unitary polar factor) as centers in units
+  of the lattice vector, for a model with one or two lattice vectors.
+  Tests: a band made of one orbital has its center on the orbital
+  ((0.3, 0.6) of an oblique cell, 1e-12, atomic frame); the SSH centers
+  are 1/4 and 3/4 (1e-9); -2 pi times their sum equals `berry_phase`
+  (1e-10, both frames, with overlap); their winding equals
+  `chern_number` (1e-9, both Haldane phases, both flux signs, both
+  orders of the lattice vectors); a chain in a plane and a sheet in 3D
+  (1e-12).
+- `kane_mele(..., lam_r=0.0, lam_v=0.0)`: the nearest-neighbor Rashba
+  term i lam_r (s x d_ij)_z and the staggered energy +/- lam_v of Eq.
+  (1) of Kane and Mele, PRL 95, 146802 (2005), each added only when
+  nonzero. Tests: the default builds exactly the 0.14.0 blocks; with
+  `lam_v` the model equals two Haldane copies (1e-12) and its smallest
+  gap at K, K' is 2 |3 sqrt(3) lam_so - |lam_v|| (1e-12); the Rashba
+  blocks equal i lam_r (s x d)_z for the bond directions (1e-15), time
+  reversal holds (1e-12), Kramers pairs at the four invariant momenta
+  (1e-12), and S_z is not conserved.
+- `hamop.berry._states_many(..., gaps=True)` (private) also returns the
+  direct gap above the occupied bands; the default call is unchanged.
+
+### Fixed
+
+- `berry_curvature` ran every plaquette loop b1 first and b2 second,
+  which is clockwise in Cartesian k-space when the lattice vectors are
+  left-handed (det(cell) < 0). Listing the two lattice vectors of the
+  same crystal in the other order therefore flipped the sign of the
+  fluxes, of `chern_number` (both frames, both solvers), of
+  `band_curvatures` and of `berry_dipole`, while `sigma_tensor` and
+  `quantum_weight`, which work in Cartesian axes, did not change. The
+  Haldane model (t1 = -1, t2 = 0.1, phi = pi/2) with its lattice
+  vectors as (a2, a1): before C = -1.000000, now +1.000000, as its
+  sigma_xy(0) = +1.000000 e^2/h requires (TKNN). Gapped graphene with
+  one strained bond (mass 0.5 eV, bond scale 1.3, mesh 36, mu = 0.9 eV,
+  kT = 0.3 eV): `berry_dipole` gave D = (-0.005340, +0.009250) Angstrom
+  for (a1, a2) and (+0.005340, -0.009250) for (a2, a1) ("fermi" form:
+  (-0.005866, +0.010160) and its negative); now both cells give the
+  first. The fluxes are now negated for a left-handed cell; right-handed
+  cells, which include every built-in model, give bit-identical results.
+  Tests: `test_chern_number_does_not_depend_on_the_order_of_the_lattice_vectors`,
+  `test_plaquette_fluxes_of_a_relisted_cell_are_the_same_set`,
+  `test_berry_dipole_does_not_depend_on_the_order_of_the_lattice_vectors`.
+- `magnetic_supercell` took the Peierls phase counterclockwise in the
+  fractional (u, v) coordinates, which is clockwise in the plane for a
+  left-handed cell, so the field was reversed. Square lattice, flux 1/3,
+  lattice vectors (a2, a1): the phase around a counterclockwise unit
+  square was -2 pi/3 (now +2 pi/3, the direction `with_peierls` uses for
+  phi > 0), and sigma_xy(0) with mu = -1.3 eV in the lowest gap +1.0000
+  e^2/h (now -1.0000, as for (a1, a2)). Right-handed cells are
+  bit-identical. Test:
+  `test_magnetic_supercell_field_direction_does_not_depend_on_the_cell_order`.
+- `berry_phase` with `closure=G` solved for the occupied states at
+  k0 + G again instead of building them from those at k0, so the phase
+  the eigensolver chose for them entered the result. Haldane model with
+  m_ab = 0.2, a loop of 60 points along b1 at s2 = 0: atomic frame,
+  before -1.211349 when started at 0 and +1.930244 when started at
+  b1/2 (pi apart), now -1.211349 for every start; periodic frame with
+  `closure=b1`, before +3.088952, now -0.052641, the value without
+  `closure`. The end states are now D^dag s(k0), D = diag(exp(i G.tau)),
+  in the atomic frame and s(k0) in the periodic frame. Test:
+  `test_berry_phase_closure_does_not_depend_on_the_solver_phase`.
+
+### Changed
+
+- `berry_phase` refuses a `closure` that is not a reciprocal lattice
+  vector (the loop would not be closed). Test:
+  `test_closure_must_be_a_reciprocal_lattice_vector`.
+- Documented, not changed: `berry_phase` returns arg prod det <u_i|u_i+1>,
+  which is minus Berry's phase (M. V. Berry, Proc. R. Soc. Lond. A 392,
+  45 (1984)), the convention of the plaquette fluxes that sum to 2 pi C.
+  Test: `test_berry_phase_sign_convention_spin_half` (exact discrete
+  loop to 1e-10, pi (1 - cos theta) to 1e-4). The fluxes of
+  `berry_curvature` lie in [-pi, pi] (a left-handed cell negates them).
+- CI: the test workflow runs on `ubuntu-24.04` instead of
+  `ubuntu-latest`, which no longer provides Python 3.9.
+- The tutorials quote "hamop 0.15.0" (their output is unchanged).
+
 ## 0.14.0 (2026-10-18)
 
 Bulk thermoelectric transport, models periodic in fewer directions
