@@ -25,7 +25,7 @@ analysis
 Nearest-neighbor graphene with t = -2.7 eV and a = 2.46 Angstrom on a
 240 x 240 mesh; tau ~ max(|E|, 1 meV)^p with E measured from the Dirac
 point (the 1 meV floor keeps tau positive at the Dirac point itself).
-Run time: about 8 s of CPU time.  Printed output (hamop 0.14.0):
+Run time: about 8 s of CPU time.  Printed output (hamop 0.15.0):
 
 n (1e12/cm^2)   mu (eV)   S measured     S fit   S, constant tau
    2.00      0.1364    -94.0 +/- 1.5    -94.9        -50.3
