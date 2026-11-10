@@ -105,6 +105,15 @@ def magnetic_supercell(model: TightBindingModel, p: int,
     equivalent flux (n p)/(n q) that clears the fractions -- same
     physics, compatible gauge.
 
+    Field direction (since 0.15.0): positive p/q is a field along +z,
+    the direction :func:`with_peierls` uses for phi > 0: the phase
+    around a plaquette traversed counterclockwise in the (x, y) plane is
+    +2 pi p/q times its area in unit cells, whatever the order of the
+    lattice vectors.  Before 0.15.0 the phase was taken counterclockwise
+    in the (u, v) coordinates, which is clockwise in the plane when
+    a1 x a2 < 0, so listing the two lattice vectors of the same crystal
+    in the other order reversed the field (and the sign of sigma_xy).
+
     Returns a TightBindingModel with q times the sites and cell
     [q a1, a2].  Anchors in the tests: p = 0 reproduces exact band
     folding of the original model; the pi-flux square lattice
@@ -121,6 +130,9 @@ def magnetic_supercell(model: TightBindingModel, p: int,
         raise ValueError("q must be a positive integer")
     inv_cell = np.linalg.inv(model.cell)
     frac_pos = model.positions @ inv_cell           # (u, v) per site
+    # +1 when (a1, a2) is right-handed; for a left-handed cell the (u, v)
+    # orientation is clockwise in the plane, so the phase changes sign
+    hand = 1.0 if np.linalg.det(model.cell) > 0.0 else -1.0
     # translation-consistency check: p * frac(dv) integer for all hops
     for i, j, image, Hb, Sb in model._hops:
         dv = (frac_pos[j][1] + image[1]) - frac_pos[i][1]
@@ -145,7 +157,7 @@ def magnetic_supercell(model: TightBindingModel, p: int,
             ui = frac_pos[i][0] + n
             uj = frac_pos[j][0] + n + image[0]
             dv = (frac_pos[j][1] + image[1]) - frac_pos[i][1]
-            theta = 2.0 * np.pi * (p / q) * 0.5 * (ui + uj) * dv
+            theta = hand * 2.0 * np.pi * (p / q) * 0.5 * (ui + uj) * dv
             ph = np.exp(1j * theta)
             n_tgt = n + image[0]
             img_sc = (n_tgt // q, image[1])

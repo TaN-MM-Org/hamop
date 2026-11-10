@@ -183,6 +183,45 @@ def _link(model, frame, k_from, s_from, k_to, s_to):
     return d / abs(d)
 
 
+def _orbital_positions(model):
+    """Cartesian position of every orbital (its site's), (nao, dim)."""
+    return np.repeat(model.positions, model.norb, axis=0)
+
+
+def _check_reciprocal(model, G):
+    """Refuse a closure that is not a reciprocal lattice vector: the
+    loop would then not be closed and its phase would mean nothing."""
+    if model.cell is None:
+        raise ValueError("closure needs a periodic model")
+    G = model._kvec(G)
+    m = model.cell @ G / (2.0 * np.pi)       # G = sum_i m_i b_i
+    resid = G - np.rint(m) @ model.reciprocal_vectors
+    scale = max(1.0, float(np.abs(m).max()))
+    if np.abs(m - np.rint(m)).max() > 1e-8 * scale or \
+            np.abs(resid).max() > 1e-8 * max(1.0, float(np.abs(G).max())):
+        raise ValueError(
+            "closure must be a reciprocal lattice vector (an integer "
+            "combination of model.reciprocal_vectors); got "
+            f"{np.round(m, 6).tolist()} in units of the reciprocal "
+            "vectors")
+    return G
+
+
+def _closing_states(model, s0, G, frame):
+    """The occupied frame at k0 + G, built from the one at k0 instead of
+    being solved for again (since 0.15.0).  In the periodic (Loewdin)
+    frame H(k + G) = H(k), so the frame is the same; in the atomic gauge
+    H(k + G) = D^dag H(k) D with D = diag(exp(i G . tau)) (tau the
+    orbital positions), so the frame is D^dag s0.  An eigenvector solved
+    for again at k0 + G carries a phase of the solver's choosing, which
+    entered the loop's phase: before 0.15.0 the same loop started at a
+    different point could come out shifted by pi."""
+    if frame == "lowdin":
+        return s0
+    ph = np.exp(-1j * (_orbital_positions(model) @ G))
+    return ph[:, None] * s0
+
+
 def berry_phase(model: TightBindingModel, kpts: Sequence[ArrayLike],
                 n_occ: int = 1, frame: str = "lowdin",
                 closure: Optional[ArrayLike] = None,
@@ -200,6 +239,26 @@ def berry_phase(model: TightBindingModel, kpts: Sequence[ArrayLike],
     one-dimensional model, a loop of evenly spaced points spanning one
     reciprocal period gives the Zak phase (origin- and
     frame-convention dependent; see the module docstring).
+
+    Sign convention: the result is arg prod_i det <u_i|u_{i+1}>, the
+    phase of the product of the link determinants along the loop.  In
+    the continuum limit this is MINUS Berry's phase
+    gamma = integral of i <u|d_k u> . dk (M. V. Berry, Proc. R. Soc.
+    Lond. A 392, 45 (1984)), and it is the convention of the plaquette
+    fluxes of :func:`berry_curvature` (Fukui, Hatsugai and Suzuki),
+    whose sum is 2 pi times the Chern number.  For the lower state of
+    H(k) = -n(k) . sigma, with the unit vector n at polar angle theta
+    turning once counterclockwise about z as k runs along the loop, it
+    is +pi (1 - cos theta), where Berry's gamma is -pi (1 - cos theta)
+    (a test pins this).  Quantized values (0 or pi) do not depend on
+    the sign.
+
+    closure must be a reciprocal lattice vector (since 0.15.0; anything
+    else does not close the loop and is refused).  The occupied states
+    at the end point k0 + closure are built from those at k0 (see
+    `_closing_states`); before 0.15.0 they were solved for again, and
+    the solver's arbitrary phase made the result depend on where the
+    loop started (by pi for the Haldane model in the regression test).
     """
     kpts = [np.atleast_1d(np.asarray(k, dtype=float)) for k in kpts]
     states = [_get_states(model, k, n_occ, frame, solver) for k in kpts]
@@ -207,8 +266,9 @@ def berry_phase(model: TightBindingModel, kpts: Sequence[ArrayLike],
         k_end = kpts[0]
         states.append(states[0])
     else:
-        k_end = kpts[0] + np.atleast_1d(np.asarray(closure, dtype=float))
-        states.append(_get_states(model, k_end, n_occ, frame, solver))
+        G = _check_reciprocal(model, closure)
+        k_end = kpts[0] + G
+        states.append(_closing_states(model, states[0], G, frame))
     klist = kpts + [k_end]
     prod = 1.0 + 0.0j
     for i in range(len(states) - 1):
@@ -223,11 +283,21 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
     """Lattice Berry curvature (plaquette fluxes) of the lowest
     ``n_occ`` bands on a mesh x mesh grid of the 2D Brillouin zone.
 
-    Returns an (mesh, mesh) array of fluxes in (-pi, pi]; their sum is
-    2 pi times the Chern number.  frame and solver as in
-    :func:`berry_phase`; in the atomic frame the wrapped boundary
-    points are evaluated explicitly rather than identified modulo the
-    zone.
+    Returns an (mesh, mesh) array of fluxes in [-pi, pi]; their sum is
+    2 pi times the Chern number.  Entry (i, j) belongs to the plaquette
+    with corners (i/N) b1 + (j/N) b2 and (i+1)/N, (j+1)/N.  frame and
+    solver as in :func:`berry_phase`; in the atomic frame the wrapped
+    boundary points are evaluated explicitly rather than identified
+    modulo the zone.
+
+    Orientation (since 0.15.0): each flux is the phase of the link
+    product taken counterclockwise in the Cartesian (k_x, k_y) plane,
+    whatever the order of the lattice vectors.  Before, the loop always
+    ran b1 first and then b2, which is clockwise when the lattice
+    vectors are left-handed (a1 x a2 < 0), so the fluxes, the Chern
+    number, `band_curvatures` and `berry_dipole` changed sign when the
+    two lattice vectors of the same crystal were listed in the other
+    order (the Haldane model gave C = -1 while sigma_xy = +e^2/h).
 
     Since 0.14.0 the dense solver assembles and diagonalizes all grid
     points at once and takes the link determinants as array operations
@@ -245,7 +315,8 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
         raise ValueError(f"n_occ must lie in [1, {model.nao}] (the number "
                          "of bands of this model)")
     if solver != "dense":
-        return _berry_curvature_loop(model, N, n_occ, frame, solver)
+        F = _berry_curvature_loop(model, N, n_occ, frame, solver)
+        return _counterclockwise(model, F)
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
     b1, b2 = recip[0], recip[1]
     n_pts = N if frame == "lowdin" else N + 1
@@ -272,7 +343,19 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
         u = _links_many(model, frame, kat(a0, a1), at(a0, a1),
                         kat(c0, c1), at(c0, c1))
         prod = u if prod is None else prod * u
-    return np.angle(prod).astype(float)
+    return _counterclockwise(model, np.angle(prod).astype(float))
+
+
+def _counterclockwise(model, F):
+    """Plaquette fluxes oriented counterclockwise in Cartesian k-space.
+    The links run b1, then b2, which is counterclockwise only when
+    b1 x b2 > 0, i.e. det(cell) > 0; for a left-handed cell the loop is
+    reversed, which negates every flux (the phase of the reversed loop
+    is the complex conjugate).  New in 0.15.0; before, a left-handed
+    cell gave the opposite sign."""
+    if np.linalg.det(model.cell) < 0.0:
+        return -F
+    return F
 
 
 def _bloch_periodic_many(model, K):
@@ -309,24 +392,40 @@ def _bloch_periodic_many(model, K):
     return 0.5 * (H + np.conj(np.swapaxes(H, 1, 2))), S
 
 
-def _states_many(model, K, n_occ, frame):
+def _states_many(model, K, n_occ, frame, gaps=False):
     """The occupied frames of `_get_states` (dense solver) at every row
     of K, shape (nk, nao, n_occ), in blocks of k-points that keep the
-    stacked matrices near 16 MB."""
+    stacked matrices near 16 MB.  With ``gaps`` (new in 0.15.0) also the
+    direct gap e_{n_occ} - e_{n_occ - 1} above the occupied bands at
+    every k, shape (nk,)."""
     size = max(1, (1 << 20) // max(1, model.nao * model.nao))
     if K.shape[0] <= size:
-        return _states_block(model, K, n_occ, frame)
-    return np.concatenate([_states_block(model, K[s:s + size], n_occ, frame)
-                           for s in range(0, K.shape[0], size)])
+        return _states_block(model, K, n_occ, frame, gaps)
+    parts = [_states_block(model, K[s:s + size], n_occ, frame, gaps)
+             for s in range(0, K.shape[0], size)]
+    if not gaps:
+        return np.concatenate(parts)
+    return (np.concatenate([p[0] for p in parts]),
+            np.concatenate([p[1] for p in parts]))
 
 
-def _states_block(model, K, n_occ, frame):
+def _gap_above(e, n_occ):
+    """Direct gap above the lowest n_occ eigenvalues of each row; 0 where
+    no empty band is left."""
+    if n_occ < e.shape[1]:
+        return e[:, n_occ] - e[:, n_occ - 1]
+    return np.zeros(e.shape[0])
+
+
+def _states_block(model, K, n_occ, frame, gaps=False):
     if frame == "lowdin":
         H, S = _bloch_periodic_many(model, K)
     else:
         H, S = model._bloch_many(K)
     if S is None:
-        return np.linalg.eigh(H)[1][:, :, :n_occ]
+        e, v = np.linalg.eigh(H)
+        c = v[:, :, :n_occ]
+        return (c, _gap_above(e, n_occ)) if gaps else c
     w, V = np.linalg.eigh(S)
     if frame == "lowdin" and w.min() <= 1e-10:
         raise ValueError(
@@ -336,15 +435,19 @@ def _states_block(model, K, n_occ, frame):
     if w.min() > 1e-10:                  # canonical orthogonalization
         X = V / np.sqrt(w)[:, None, :]   # keeps every direction
         Hp = np.conj(np.swapaxes(X, 1, 2)) @ H @ X
-        c = (X @ np.linalg.eigh(Hp)[1])[:, :, :n_occ]
+        e, v = np.linalg.eigh(Hp)
+        c = (X @ v)[:, :, :n_occ]
+        gap = _gap_above(e, n_occ)
     else:                                # atomic frame, dropped states
-        c = np.array([gen_eigh(H[i], S[i], eigvals_only=False)[1][:, :n_occ]
-                      for i in range(K.shape[0])])
+        sol = [gen_eigh(H[i], S[i], eigvals_only=False)
+               for i in range(K.shape[0])]
+        c = np.array([cv[:, :n_occ] for _, cv in sol])
+        gap = np.array([_gap_above(ev[None], n_occ)[0] for ev, _ in sol])
     if frame == "atomic":
-        return c
+        return (c, gap) if gaps else c
     # Loewdin map d = S^(1/2) c
-    return (V * np.sqrt(w)[:, None, :]) @ (np.conj(np.swapaxes(V, 1, 2))
-                                            @ c)
+    d = (V * np.sqrt(w)[:, None, :]) @ (np.conj(np.swapaxes(V, 1, 2)) @ c)
+    return (d, gap) if gaps else d
 
 
 def _links_many(model, frame, k_from, s_from, k_to, s_to):

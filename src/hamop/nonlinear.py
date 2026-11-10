@@ -97,6 +97,11 @@ def band_curvatures(model: TightBindingModel, mesh: int,
     moment -- the C3 symmetry anchor in the tests is precisely what
     caught this. Local curvature fields must come from the frame that
     evaluates the wrapped boundary points explicitly.
+
+    The fluxes are oriented counterclockwise in Cartesian k-space (see
+    :func:`hamop.berry_curvature`); before 0.15.0 omega, and with it
+    the dipole of :func:`berry_dipole`, changed sign when the lattice
+    vectors were left-handed (a1 x a2 < 0).
     """
     if model.cell is None or model.cell.shape != (2, 2):
         raise ValueError("band_curvatures needs a 2D periodic model")

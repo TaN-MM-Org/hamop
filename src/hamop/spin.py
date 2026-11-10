@@ -18,7 +18,10 @@ exactly two Haldane copies with opposite chirality, its spin-orbit gap
 at the K point is exactly 6 sqrt(3) lambda_so, its total Chern number
 vanishes, and its two spin sectors carry Chern numbers +/-1 -- all of
 which the test suite asserts against the already-validated Haldane
-machinery.
+machinery.  Since 0.15.0 ``kane_mele`` also takes the Rashba and
+staggered terms of Kane and Mele, Phys. Rev. Lett. 95, 146802 (2005);
+with Rashba coupling S_z is no longer conserved, and the model is
+classified by :func:`hamop.z2_invariant` instead of spin Chern numbers.
 """
 from __future__ import annotations
 
@@ -58,15 +61,38 @@ def with_spin(model: TightBindingModel) -> TightBindingModel:
 
 
 def kane_mele(t1: float = -1.0, lam_so: float = 0.05,
-              a: float = 1.0) -> TightBindingModel:
-    """Kane-Mele model with S_z conserved (Kane and Mele, PRL 95,
-    226801 (2005)): nearest-neighbour hop t1 (spin diagonal) plus the
+              a: float = 1.0, lam_r: float = 0.0,
+              lam_v: float = 0.0) -> TightBindingModel:
+    """Kane-Mele model (Kane and Mele, PRL 95, 226801 (2005); the
+    Rashba and staggered terms as in Eq. (1) of Kane and Mele, PRL 95,
+    146802 (2005)): nearest-neighbor hop t1 (spin diagonal) plus the
     intrinsic spin-orbit term i lambda_so nu_ij s_z on second
-    neighbours.  Decouples exactly into two Haldane copies --
-    spin up = haldane(t1, t2=lam_so, phi=+pi/2), spin down the
-    conjugate copy -- so the spin-orbit gap at K is 6 sqrt(3) lambda_so
-    and the two spin sectors carry opposite unit Chern numbers while
-    the total Chern number is zero.
+    neighbors.
+
+    With lam_r = lam_v = 0 (the default) S_z is conserved and the model
+    decouples exactly into two Haldane copies -- spin up =
+    haldane(t1, t2=lam_so, phi=+pi/2), spin down the conjugate copy --
+    so the spin-orbit gap at K is 6 sqrt(3) lambda_so and the two spin
+    sectors carry opposite unit Chern numbers while the total Chern
+    number is zero.
+
+    lam_v (new in 0.15.0): a staggered on-site energy, +lam_v on
+    sublattice A (site 0) and -lam_v on B, the m_ab of
+    :func:`hamop.haldane`.  It keeps S_z conserved; the two copies are
+    then haldane(..., m_ab=lam_v), so the gap closes at
+    |lam_v| = 3 sqrt(3) |lam_so| and, with lam_r = 0, the model is a
+    quantum spin Hall insulator (Z2 = 1) below that value and an
+    ordinary insulator (Z2 = 0) above it.
+
+    lam_r (new in 0.15.0): the nearest-neighbor Rashba term
+    i lam_r (s x d_ij)_z = i lam_r (s_x d_y - s_y d_x) on the bond from
+    site i to site j, with d_ij the unit vector along that bond.  It
+    mixes the two spins (S_z is no longer conserved) but keeps time
+    reversal, so the Z2 invariant (:func:`hamop.z2_invariant`) still
+    classifies the model.  Taking d_ij the other way round is the same
+    model with lam_r -> -lam_r, which a rotation of the spin by pi
+    about z maps onto this one.  Both new terms are added only when
+    they are nonzero, so the default model is unchanged.
 
     Spin degeneracy is explicit here: use spin=1 in the observables.
     """
@@ -75,10 +101,18 @@ def kane_mele(t1: float = -1.0, lam_so: float = 0.05,
     mdl = TightBindingModel(positions=pos, norb=2, cell=cell)
     s0, sz = PAULI["0"], PAULI["z"]
     for img in [(0, 0), (-1, 0), (0, -1)]:
-        mdl.add_hop(0, 1, img, t1 * s0)
+        blk = t1 * s0
+        if lam_r != 0.0:
+            d = pos[1] + np.asarray(img, dtype=float) @ cell - pos[0]
+            d = d / np.linalg.norm(d)
+            blk = blk + 1.0j * lam_r * (PAULI["x"] * d[1] - PAULI["y"] * d[0])
+        mdl.add_hop(0, 1, img, blk)
     tc = 1.0j * lam_so
     for img in [(1, 0), (-1, 1), (0, -1)]:      # chirality on sublattice A
         mdl.add_hop(0, 0, img, tc * sz)
     for img in [(1, 0), (-1, 1), (0, -1)]:      # opposite on sublattice B
         mdl.add_hop(1, 1, img, np.conj(tc) * sz)
+    if lam_v != 0.0:
+        mdl.add_hop(0, 0, (0, 0), lam_v * s0)
+        mdl.add_hop(1, 1, (0, 0), -lam_v * s0)
     return mdl
