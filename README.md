@@ -19,8 +19,9 @@ computes:
   wires (the **transmission**), and from it the conductance, current
   and thermovoltage a measurement at a given temperature would report;
 - topological numbers such as the **Chern number** and, for crystals
-  with time-reversal symmetry, the **Z2 index**, and related
-  geometric quantities of the electron states;
+  with time-reversal symmetry, the **Z2 index** (in 2D, and the strong
+  and weak indices in 3D), and related geometric quantities of the
+  electron states;
 - for your own measurements: model parameters fitted to measured band
   energies with error bars, error bars for anything computed from
   them, a test of whether the data need a richer model, the chemical
@@ -42,7 +43,7 @@ through the same eigensolver, the topology functions work from the
 same hopping blocks, and `principal_layers` cuts the same model into
 the layer blocks that the transport functions take.
 
-The package also works when neighbouring orbitals overlap (a
+The package also works when neighboring orbitals overlap (a
 **nonorthogonal basis**, as in LCAO calculations, which build electron
 states from atomic orbitals), and it can read Hamiltonians exported by
 Wannier90, a widely used program that turns first-principles
@@ -60,6 +61,7 @@ material come from your own calculation or measurement.
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
 - [How the results are checked](#how-the-results-are-checked)
+- [What changed in 0.16.0](#what-changed-in-0160)
 - [What changed in 0.15.0](#what-changed-in-0150)
 - [What changed in 0.14.0](#what-changed-in-0140)
 - [What changed in 0.13.0](#what-changed-in-0130)
@@ -82,7 +84,7 @@ material come from your own calculation or measurement.
   energy matrix must be Hermitian so that its energies are real; the
   reverse hopping added for you is the "Hermitian partner" of the one
   you give.
-- **Overlap, nonorthogonal basis** -- in some models neighbouring
+- **Overlap, nonorthogonal basis** -- in some models neighboring
   orbitals are not independent: they overlap by an amount `s`. The
   overlap matrix is called `S`. If you give no overlap, `S` is the
   identity (an **orthogonal basis**).
@@ -118,7 +120,7 @@ material come from your own calculation or measurement.
   through a device at energy `E`; in the Landauer picture the
   conductance is this number times `e^2/h` per spin. The device sits
   between two semi-infinite **leads** (wires), and is cut into
-  **principal layers** that couple only to their nearest neighbours.
+  **principal layers** that couple only to their nearest neighbors.
   The method is the **nonequilibrium Green function (NEGF)** method.
 - **Conductance, Seebeck coefficient, Lorenz ratio** -- at a finite
   temperature `T` a measurement averages `T(E)` over a window of a few
@@ -157,7 +159,9 @@ material come from your own calculation or measurement.
   index: 1 for a quantum spin Hall insulator, whose edges carry
   conducting states although its inside is insulating, and 0 for an
   ordinary insulator. Like the Chern number, it cannot change unless
-  a band gap closes.
+  a band gap closes. A 3D crystal has four such indices: a **strong**
+  topological insulator has `nu0 = 1`, a **weak** one (like a stack of
+  2D layers) has `nu0 = 0` and some other index 1 (example 16).
 - **Hybrid Wannier center** -- the average position, along one lattice
   direction, of an electron state that is localized along that
   direction and spread out along the other. How these centers move as
@@ -222,7 +226,7 @@ Units and conventions, stated once:
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with hamop 0.15.0. The model parameters are illustrative
+printed with hamop 0.16.0. The model parameters are illustrative
 values, not fitted to any material, unless the text says otherwise.
 
 ### 1. Graphene: bands and the absorption plateau
@@ -237,7 +241,7 @@ b = 2 * np.pi * np.linalg.inv(g.cell).T   # reciprocal lattice vectors (rows)
 K = (2 * b[0] + b[1]) / 3                 # a corner of the Brillouin zone
 e_gamma = bands(g, [np.zeros(2)])[0]
 e_K = bands(g, [K])[0]
-print(f"band energies at the zone centre: {e_gamma[0]:+.4f} {e_gamma[1]:+.4f} eV")
+print(f"band energies at the zone center: {e_gamma[0]:+.4f} {e_gamma[1]:+.4f} eV")
 print("gap at the zone corner K below 1e-9 eV:", abs(e_K[1] - e_K[0]) < 1e-9)
 
 omega = np.array([1.0, 1.3])              # photon energies, eV
@@ -247,13 +251,13 @@ for w, s in zip(omega, sigma):
 ```
 
 ```
-band energies at the zone centre: -8.1000 +8.1000 eV
+band energies at the zone center: -8.1000 +8.1000 eV
 gap at the zone corner K below 1e-9 eV: True
 photon 1.0 eV: sigma = 1.020 x e^2/(4 hbar)
 photon 1.3 eV: sigma = 1.032 x e^2/(4 hbar)
 ```
 
-The two bands sit at `-/+ 3|t|` at the zone centre and touch at the
+The two bands sit at `-/+ 3|t|` at the zone center and touch at the
 corner K (the "Dirac point"). The absorption is close to 1 in units of
 `e^2/(4 hbar)`, the universal optical conductivity of graphene
 (Kuzmenko et al., Phys. Rev. Lett. 100, 117401 (2008)). The test suite
@@ -361,7 +365,7 @@ outside the band, so nothing passes.
 ```python
 from hamop import linear_chain, drude_weight
 
-# A chain whose neighbouring orbitals overlap (s = 0.2), half filled.
+# A chain whose neighboring orbitals overlap (s = 0.2), half filled.
 m1 = linear_chain(t=-1.0, e0=0.0, s=0.2)
 D1 = drude_weight(m1, mu=0.0, mesh=800, T=100.0)
 
@@ -475,8 +479,8 @@ path = os.path.join(tempfile.mkdtemp(), "graphene_hr.dat")
 hamop.save_wannier90_hr(path, H_R)
 
 cell = a * np.array([[1.0, 0.0], [0.5, np.sqrt(3) / 2]])
-centres = np.array([[0.0, 0.0], (cell[0] + cell[1]) / 3])
-m = hamop.from_wannier90(path, cell, centers=centres)
+centers = np.array([[0.0, 0.0], (cell[0] + cell[1]) / 3])
+m = hamop.from_wannier90(path, cell, centers=centers)
 
 k = np.random.default_rng(0).uniform(-2, 2, (20, 2))
 diff = np.abs(hamop.bands(m, k) - hamop.bands(hamop.graphene(t, a), k)).max()
@@ -489,9 +493,9 @@ bands agree to 1e-12 eV at 20 random k-points: True
 
 A `seedname_hr.dat` file (Mostofi et al., Comput. Phys. Commun. 185,
 2309 (2014)) holds the real-space Hamiltonian but not the lattice
-vectors or the orbital centres. You supply the lattice vectors
-(`cell`). The centres are optional: band energies do not depend on
-them, but optical matrix elements do, so give the true centres when
+vectors or the orbital centers. You supply the lattice vectors
+(`cell`). The centers are optional: band energies do not depend on
+them, but optical matrix elements do, so give the true centers when
 you need optics.
 
 ### 9. Transport at a finite temperature: conductance, current, thermovoltage
@@ -540,7 +544,7 @@ formula) gives +0.158 microvolt/K here. The energy grid must reach 30
 `kT` beyond the chemical potentials and resolve `kT`; otherwise the
 functions refuse and say how to fix the grid.
 
-### 10. Reading a Wannier90 `tb.dat` file (cell and centres included)
+### 10. Reading a Wannier90 `tb.dat` file (cell and centers included)
 
 ```python
 import os, tempfile
@@ -549,8 +553,8 @@ import hamop
 
 # A seedname_tb.dat in the Wannier90 layout: date line, lattice vectors
 # (Angstrom), num_wann, nrpts, degeneracies, then H(R) and r(R) blocks.
-# Here: one orbital centred at x = 0.4 Angstrom in a chain of period 2.0,
-# on-site energy 0.1 eV and hopping -1.0 eV to both neighbours.
+# Here: one orbital centered at x = 0.4 Angstrom in a chain of period 2.0,
+# on-site energy 0.1 eV and hopping -1.0 eV to both neighbors.
 text = """ written by hand
   2.0 0.0 0.0
   0.0 10.0 0.0
@@ -577,9 +581,9 @@ path = os.path.join(tempfile.mkdtemp(), "chain_tb.dat")
 with open(path, "w") as fh:
     fh.write(text)
 
-m = hamop.from_wannier90_tb(path)       # cell and centre come from the file
+m = hamop.from_wannier90_tb(path)       # cell and center come from the file
 print("periodic directions:", m.cell.shape[0], " cell:", m.cell.ravel(),
-      " centre:", m.positions.ravel())
+      " center:", m.positions.ravel())
 k = np.linspace(-1.5, 1.5, 7)[:, None]
 ref = hamop.linear_chain(t=-1.0, e0=0.1, a=2.0)
 diff = np.abs(hamop.bands(m, k) - hamop.bands(ref, k)).max()
@@ -587,14 +591,14 @@ print("bands agree with linear_chain to 1e-12 eV:", diff < 1e-12)
 ```
 
 ```
-periodic directions: 1  cell: [2.]  centre: [0.4]
+periodic directions: 1  cell: [2.]  center: [0.4]
 bands agree with linear_chain to 1e-12 eV: True
 ```
 
 `seedname_tb.dat` (written by Wannier90 with `write_tb = true`) holds
 the lattice vectors, the Hamiltonian `H(R)` and the position matrix
 elements `<m0|r|nR>` in one file, so `from_wannier90_tb` needs no
-cell and no centres from you. The orbital positions are taken from
+cell and no centers from you. The orbital positions are taken from
 the diagonal elements `<m0|r|m0>`; the off-diagonal ones are read by
 `load_wannier90_tb` but not used (see Limits). Directions in which no
 hopping occurs are dropped, so this chain imports as a 1D model.
@@ -828,6 +832,115 @@ Vanderbilt, Phys. Rev. B 83, 235401 (2011)). It adds k-lines where the
 centers move too fast, and it refuses a model without time-reversal
 symmetry, an odd number of occupied bands, or bands that touch.
 
+### 16. A 3D topological insulator: strong and weak Z2 indices
+
+```python
+import numpy as np
+from hamop import PAULI, TightBindingModel, z2_invariant_3d
+
+s0, sx, sy, sz = PAULI["0"], PAULI["x"], PAULI["y"], PAULI["z"]
+mass, Gam = np.kron(sz, s0), [np.kron(sx, s) for s in (sx, sy, sz)]
+
+def cubic_ti(M, tz=1.0):
+    """Two orbitals of opposite parity times spin on a cubic lattice:
+    H(k) = [M - cos kx - cos ky - tz cos kz] tau_z + sum_i sin k_i tau_x s_i."""
+    m = TightBindingModel([[0.0, 0.0, 0.0]], 4, cell=np.eye(3))
+    m.add_hop(0, 0, (0, 0, 0), M * mass)
+    for i, t in enumerate((1.0, 1.0, tz)):
+        image = [0, 0, 0]
+        image[i] = 1
+        m.add_hop(0, 0, tuple(image), -0.5 * t * mass + Gam[i] / 2j)
+    return m
+
+for M, tz in [(2.0, 1.0), (1.0, 0.2), (4.0, 1.0)]:
+    r = z2_invariant_3d(cubic_ti(M, tz), n_occ=2)
+    print(f"M = {M}, tz = {tz}: nu0;(nu1 nu2 nu3) = {r['label']}")
+```
+
+```
+M = 2.0, tz = 1.0: nu0;(nu1 nu2 nu3) = 1;(000)
+M = 1.0, tz = 0.2: nu0;(nu1 nu2 nu3) = 0;(001)
+M = 4.0, tz = 1.0: nu0;(nu1 nu2 nu3) = 0;(000)
+```
+
+A crystal with time-reversal symmetry in three dimensions has four Z2
+indices, written `nu0;(nu1 nu2 nu3)` (Fu, Kane and Mele, Phys. Rev.
+Lett. 98, 106803 (2007)). `nu0 = 1` is a **strong** topological
+insulator. `nu0 = 0` with some `nu_i = 1` is a **weak** one, which is
+equivalent to a stack of 2D quantum spin Hall layers; here the layers
+are stacked along z, where the hopping `tz` is weak. All four 0 is an ordinary
+insulator. `z2_invariant_3d` computes the 2D index of the six planes of
+the Brillouin zone at 0 and half a reciprocal vector along each
+direction, with `z2_invariant`, and combines them. The model has
+inversion symmetry, so the parity formula of Fu and Kane (Phys. Rev. B
+76, 045302 (2007)) gives the same indices from eight momenta; the
+tests check that in every phase of the model.
+
+### 17. Overlapping orbitals: Chern number, quantum metric and Hall conductivity
+
+```python
+import numpy as np
+from hamop import haldane, chern_number, quantum_weight, sigma_tensor
+
+for s in (None, 0.1):                  # without and with overlap s
+    h = haldane(t1=-1.0, t2=0.1, m_ab=0.2, s=s)
+    C = chern_number(h, mesh=24)
+    q = quantum_weight(h, mesh=36)
+    sxy = sigma_tensor(h, [0.0], mu=0.0, directions=(0, 1), mesh=72,
+                       T=1.0, eta=1e-5, spin=1)[0].real * np.pi / 2
+    print(f"s = {s}: Chern number {C:+.6f}, from the metric {q['chern']:+.6f}, "
+          f"tr K = {q['tr_K']:.4f}, Kubo sigma_xy = {sxy:.5f} e^2/h")
+```
+
+```
+s = None: Chern number +1.000000, from the metric +1.000002, tr K = 1.2101, Kubo sigma_xy = 1.00000 e^2/h
+s = 0.1: Chern number +1.000000, from the metric +1.000002, tr K = 1.2111, Kubo sigma_xy = 1.00336 e^2/h
+```
+
+Since 0.16.0 the quantum geometry (`quantum_geometric_tensor`,
+`quantum_metric`, `quantum_weight`) and the Berry curvature dipole
+also take models with overlap. The geometry is that of the
+orthogonalized orbitals, and its curvature integrates to the same
+Chern number as `chern_number`. The last column is a limit to know
+about: with overlap, the Kubo Hall conductivity of `sigma_tensor` is
+not exactly `C e^2/h` (here 1.00336 instead of 1, on any fine mesh).
+The velocity it uses with overlap corresponds to position matrix
+elements `S_ij (tau_i + tau_j)/2`, and with them x and y do not
+commute. The deviation grows about as the square of the overlap.
+
+### 18. Bond currents with overlapping orbitals
+
+```python
+import numpy as np
+from hamop import chain_lead_blocks, transmission, bond_currents
+
+t, s, eps = -1.0, 0.2, 0.8            # hopping, overlap and impurity, eV
+H00, H01 = chain_lead_blocks(t=t)
+S00, S01 = np.eye(1), s * np.eye(1)
+layers, coup = [H00, H00 + eps, H00], [H01, H01]
+ov = dict(layers_S=[S00] * 3, coup_S=[S01] * 2, lead_S00=S00, lead_S01=S01)
+
+E = 0.3
+T = transmission([E], layers, coup, H00, H01, eta=1e-9, **ov)[0]
+J, offs = bond_currents(E, layers, coup, H00, H01, eta=1e-9, **ov)
+tE = t - E * s                        # the bond as seen at energy E
+exact = (4 * tE**2 - E**2) / ((4 * tE**2 - E**2) + eps**2)
+print(f"T(E) = {T:.6f}   closed form {exact:.6f}")
+print("current through each bond:", np.round([J[0, 1], J[1, 2]], 6))
+```
+
+```
+T(E) = 0.873127   closed form 0.873127
+current through each bond: [0.873127 0.873127]
+```
+
+With overlap, an electron of energy `E` sees the coupling `E S - H`,
+so this chain behaves like an orthogonal chain with hopping
+`t - E s`, and the closed form of example 4 applies with that
+hopping. `bond_currents` takes the same overlap arguments as
+`transmission` since 0.16.0 and uses `H - E S` in place of `H`; the
+current through every bond equals `T(E)`.
+
 ## Tutorials
 
 Three scripts in `examples/` carry a complete analysis from data to a
@@ -970,7 +1083,9 @@ gives its inputs, units and conventions.
   Hatsugai and Suzuki, J. Phys. Soc. Jpn. 74, 1674 (2005)). With
   overlap, two conventions are offered (`frame="lowdin"` or
   `"atomic"`); a sparse solver (`solver="sparse"`) serves large cells
-  with few occupied bands.
+  with few occupied bands. Since 0.16.0 `chern_number` refuses
+  occupied bands that touch the empty ones at a grid point
+  (`gap_min`), where the Chern number is not defined.
 - `chern_marker` -- the local Chern marker of a finite 2D model
   (Bianco and Resta, Phys. Rev. B 84, 241106(R) (2011)).
 - `hybrid_wannier_centers`, `z2_invariant` (new in 0.15.0) -- the
@@ -982,16 +1097,23 @@ gives its inputs, units and conventions.
   075119 (2011); its refinement checks are of the kind used by the
   Z2Pack code, Gresch et al., Phys. Rev. B 95, 075146 (2017)).
   Example 15. Both handle overlap, in both frames.
+- `z2_invariant_3d` (new in 0.16.0) -- the strong and weak Z2 indices
+  `nu0;(nu1 nu2 nu3)` of a 3D crystal with time-reversal symmetry
+  (Fu, Kane and Mele, Phys. Rev. Lett. 98, 106803 (2007)), from the
+  2D index of six planes of its Brillouin zone. Example 16.
 - `berry_dipole`, `band_curvatures`, `fermi_occupation` -- the Berry
   curvature dipole behind the nonlinear Hall effect (Sodemann and Fu,
   Phys. Rev. Lett. 115, 216806 (2015)), computed in two independent
   ways (`method="grad"` or `"fermi"`), the per-band curvature, and the
-  Fermi occupation factor.
+  Fermi occupation factor. Since 0.16.0 they take models with overlap
+  (the curvature of the atomic frame, and band velocities with their
+  `dS/dk` term).
 - `quantum_geometric_tensor`, `quantum_metric`, `quantum_weight` --
   the quantum metric and Berry curvature of the occupied states
   (Provost and Vallee, Commun. Math. Phys. 76, 289 (1980); Peotta and
   Torma, Nat. Commun. 6, 8944 (2015); Onishi and Fu, PRX 14, 011052
-  (2024)).
+  (2024)). Since 0.16.0 they take models with overlap: the geometry is
+  then that of the Loewdin-orthogonalized orbitals (example 17).
 
 **Spin and magnetic fields**
 
@@ -1028,7 +1150,8 @@ gives its inputs, units and conventions.
 - `device_greens`, `device_ldos`, `bond_currents` -- the device Green
   function, the local density of states per orbital, and the map of
   currents between orbitals (Paulsson and Brandbyge, Phys. Rev. B 76,
-  115117 (2007)).
+  115117 (2007)); since 0.16.0 `bond_currents` takes overlap too
+  (example 18).
 - `transmission`, `transmission_direct` and `transmission_sparse` also
   accept your own self-energy per layer (`sigma_int`).
 - `landauer_conductance`, `landauer_current`, `thermoelectric` -- the
@@ -1141,9 +1264,10 @@ doubtful number, when:
   `berry_dipole`, `quantum_weight` and `magnetic_supercell` need a
   periodic 2D model;
 - a function that does not handle overlap gets a model with overlap:
-  `kpm_sigma`, `chern_marker`, the quantum-geometry functions,
-  `band_curvatures` / `berry_dipole`, and `solver="sparse"` in the
-  Berry functions;
+  `kpm_sigma`, `chern_marker`, and `solver="sparse"` in the Berry
+  functions (the quantum-geometry functions, `band_curvatures` and
+  `berry_dipole` take overlap since 0.16.0, but refuse an overlap
+  matrix that is not positive definite or that would drop a state);
 - `monkhorst_pack(time_reversal=True)` is asked of a model with
   complex hopping blocks, where pairing `k` with `-k` is not
   guaranteed;
@@ -1156,7 +1280,7 @@ doubtful number, when:
   are thinner than the hopping range);
 - the quantum geometry is asked at a `k` where the occupied and empty
   bands are closer than `gap_min` (the geometry is undefined there);
-- a Berry link between neighbouring k-points vanishes ("refine the
+- a Berry link between neighboring k-points vanishes ("refine the
   grid"), or the overlap matrix is not positive definite in the
   `lowdin` frame;
 - a Wannier90 file is malformed (wrong counts, duplicate or missing
@@ -1240,11 +1364,25 @@ doubtful number, when:
   flow of centers it cannot follow within `max_lines` lines;
   `z2_invariant` and `hybrid_wannier_centers` refuse occupied and
   empty bands closer than `gap_min` at a sampled k-point (the centers
-  are undefined there) and an `n_occ` that leaves no empty band.
+  are undefined there) and an `n_occ` that leaves no empty band;
+- `z2_invariant_3d` (new in 0.16.0) gets a model without three lattice
+  vectors, any input `z2_invariant` refuses for one of its six planes,
+  or planes whose strong index `nu0` comes out differently along the
+  three reciprocal vectors (a flow that was not resolved);
+- `chern_number` (since 0.16.0) finds the occupied bands closer than
+  `gap_min` (default 1e-6 eV) to the empty ones at a grid point, where
+  their Chern number is not defined (before, gapless graphene gave 0);
+  `gap_min=None` turns the check off;
+- a hopping, overlap or dipole block, a chemical potential, a
+  temperature, a photon energy, or a DOS energy or width is not
+  finite, or the Landauer `spin` factor is not a positive number
+  (since 0.16.0; before, a NaN chemical potential gave an optical
+  conductivity of exactly 0 and a NaN hopping NaN bands, without an
+  error).
 
 ## How the results are checked
 
-275 automated tests run on every change, on Python 3.9, 3.10, 3.11,
+293 automated tests run on every change, on Python 3.9, 3.10, 3.11,
 3.12, 3.13 and 3.14, and once more on Python 3.10 with the oldest
 NumPy (1.22.0) and SciPy (1.8.0) the package allows. The numerical
 tests compare the package with a closed-form result, a symmetry, or a
@@ -1256,10 +1394,10 @@ tolerances the tests use:
 
 - The chain's bands equal `e0 + 2t cos ka` to 1e-12; with overlap `s`
   they equal `2t cos ka / (1 + 2s cos ka)` to 1e-12.
-- The chain's DOS at the band centre equals `1/(2 pi |t|)` to 5e-4,
+- The chain's DOS at the band center equals `1/(2 pi |t|)` to 5e-4,
   and the DOS integrates to the orbital count to 1e-6.
 - Graphene's bands touch at K to 1e-9 and sit at `-/+ 3|t|` at the zone
-  centre to 1e-12. Its optical conductivity at 1.0 and 1.3 eV is
+  center to 1e-12. Its optical conductivity at 1.0 and 1.3 eV is
   within 5 % of `e^2/(4 hbar)`.
 - At `T = 0` a level exactly at `mu` is half occupied: the optics
   then equal the `T = 1 K` result to 1e-12 and half the result with
@@ -1399,7 +1537,7 @@ tolerances the tests use:
 - `sancho_rubio` refuses at `eta = 0` inside the band; at `eta = 0`
   outside the band it matches the real closed form to 1e-12, and at
   `eta = 1e-12` inside the band the complex one to 1e-10. At the band
-  centre and other lead resonances (E = 0, 8.9e-16, 1e-10, 1.0 eV)
+  center and other lead resonances (E = 0, 8.9e-16, 1e-10, 1.0 eV)
   with `eta = 1e-8` it matches the closed form at the same complex
   energy to 1e-8 for the chain, the chain with overlap and a two-site
   layer; the impurity chain's `T(E)` there matches its closed form to
@@ -1446,11 +1584,51 @@ tolerances the tests use:
   or 0.2 changes nothing. Models without time reversal, without Kramers
   pairs, with an odd `n_occ` or without a gap are refused.
 
+**3D Z2 indices, overlap in geometry and currents, input checks (0.16.0)**
+
+- `z2_invariant_3d` gives the four indices of the parity formula of
+  Fu and Kane (eight momenta, combined as in Eqs. 2 and 3 of Fu, Kane
+  and Mele) in six phases of a four-band cubic model: strong with
+  (000) and with (111), weak along one or all three directions, and
+  ordinary. The atomic frame and a sheared cell give the same indices;
+  a term that breaks inversion but keeps the gap open changes nothing;
+  Kane-Mele layers stacked along z give `0;(00z)` with `z` the 2D index
+  of one layer from `z2_invariant`.
+- With an overlap `S = 1 + r H` (which commutes with `H`, while
+  `dS/dk` is not zero) the quantum geometric tensor equals that of the
+  orthogonal model at 30 random k-points to 1e-9 relative (measured
+  4e-11, the finite differences). With overlap it does not change
+  under `H -> H + c S` (measured 9e-11), `tr g >= 2 sqrt(det g) >=
+  |Omega|` holds at 25 points, and its curvature integrates to the
+  plaquette Chern number within 1e-5 on a 36 x 36 mesh (measured 1.6e-6,
+  as without overlap) for three models with Chern numbers 1, 0 and -1.
+- The Berry curvature dipole with overlap: the two integral forms
+  converge to each other (19 %, then 2.0 % apart on meshes 48 and 144);
+  the single mirror forces it perpendicular to the mirror (to 1e-8 of
+  the other component); a shift of the energy zero with `mu` changes it
+  by less than 1e-10 relative; filled bands and inversion give zero.
+- Bond currents with overlap obey Kirchhoff's law (1e-7), every cut
+  carries the `T(E)` of `transmission` with the same overlap (1e-6),
+  and the impurity chain with overlap matches the closed form with the
+  hopping `t - E s` (1e-7; measured 6e-9). With `H` in place of
+  `H - E S` the cuts are off by 0.14.
+- With overlap `s = 0.1` the Kubo `sigma_xy(0)` of the insulating
+  Haldane model is 1.00336 e^2/h on meshes 36 and 72 (a documented
+  limit, see Limits), while its Chern number is 1.
+- `chern_number` refuses gapless graphene (Dirac points on the grid)
+  and the spin-degenerate lowest band of the Kane-Mele model, in both
+  frames and with the sparse solver; gapped models give the same
+  integers as before. `dos`, which since 0.16.0 adds only the states
+  within 9 widths of each energy, equals the full Gaussian sum to
+  1e-13 of its largest value (measured 4e-15), also for a model whose
+  band count changes with k. NaN and infinite inputs listed under
+  "When it refuses" are refused.
+
 **Large systems, k-grids, interpolation, files, fitting**
 
 - Sparse and dense matrices are identical; Lanczos matches the open
   chain's closed form to 1e-8 (with overlap too).
-- KPM DOS: band-centre value within 1 %, integral within 0.5 %, zero
+- KPM DOS: band-center value within 1 %, integral within 0.5 %, zero
   outside the band with overlap. The in-place Chebyshev recurrence
   equals the 0.12.1 one to 1e-12 (exact trace) and bit for bit
   (stochastic trace); bounds that cut the spectrum are refused. KPM conductivity: molecular line
@@ -1476,10 +1654,10 @@ tolerances the tests use:
   and flags a too-coarse grid.
 - A hand-written graphene `hr.dat` reproduces `graphene()` bands to
   1e-12 and its optical conductivity to 1e-10; a hand-written graphene
-  `tb.dat` (Wannier90 number formats, a degeneracy-2 shell, centres
+  `tb.dat` (Wannier90 number formats, a degeneracy-2 shell, centers
   off the plane) reproduces the bands to 1e-12 and both in-plane
   optical conductivities to 1e-7 relative (the file stores 8
-  significant digits), while moving the centres to the origin changes
+  significant digits), while moving the centers to the origin changes
   the optics by more than 1 %; a save/load round trip
   keeps each block to 1e-9 (the file stores 10 decimals); four kinds
   of corrupted file (too few lines, a duplicate element, a short
@@ -1554,6 +1732,43 @@ tolerances the tests use:
   lattice matches its closed-form bands to 1e-12 and, built a second
   way as a 2D model with a vacuum cell, gives the same DOS, optics and
   Boltzmann results to 1e-12.
+
+## What changed in 0.16.0
+
+**New**
+
+- `z2_invariant_3d`: the strong and weak Z2 indices of a 3D crystal
+  with time-reversal symmetry (example 16), which closes the 3D gap of
+  the 0.15.0 limits.
+- The quantum-geometry functions and the Berry curvature dipole take
+  models with overlapping orbitals (example 17), and so does
+  `bond_currents` (example 18). Before, all three refused them.
+
+**Fixed**
+
+- `chern_number` returned an integer for bands that touch at a grid
+  point, where the Chern number is not defined: 0 for gapless graphene
+  with its Dirac points on the grid. It now checks the gap at every
+  grid point (`gap_min`, default 1e-6 eV).
+- NaN and infinite inputs gave silent nonsense: a NaN chemical
+  potential gave an optical conductivity of exactly 0, `linear_chain(
+  t=inf)` an optical conductivity of 0, a NaN hopping NaN bands, a NaN
+  temperature a NaN carrier count, and `spin=-2` a negative Landauer
+  conductance. They are now refused with a message.
+
+**Faster**
+
+- `dos` adds, for each energy, only the states within 9 Gaussian widths
+  of it: 20 to 28 times faster for graphene with 2001 energies on a
+  300 x 300 mesh (9.3 s to 0.33 s, one thread, median of 3 runs, on a
+  shared machine under load), with the same result to rounding (4e-15
+  of the largest value).
+
+**Documented**
+
+- With overlap, the Hall conductivity of `sigma_tensor` is not exactly
+  quantized (1.00336 e^2/h for the Haldane model with overlap 0.1); see
+  Limits.
 
 ## What changed in 0.15.0
 
@@ -1772,7 +1987,7 @@ tolerances the tests use:
 - Finite-temperature transport from `T(E)`: `landauer_conductance`,
   `landauer_current` and `thermoelectric` (example 9).
 - `from_wannier90_tb` reads a Wannier90 `seedname_tb.dat` file,
-  taking the lattice vectors and the orbital centres from the file
+  taking the lattice vectors and the orbital centers from the file
   itself (example 10).
 
 **Silent wrong answers that are now errors or fixed**
@@ -1783,7 +1998,7 @@ tolerances the tests use:
   chain lead at `E = 0.5` gave `0.924` instead of `0.25 - 0.968i`, and
   `transmission` gave `T = 0` inside the band; this now raises an
   error. And when `E` equals an eigenvalue of the lead layer (the band
-  centre `E = 0` of the chain) the decimation loses up to
+  center `E = 0` of the chain) the decimation loses up to
   `log10(1/eta)` digits and can settle on a wrong answer: at
   `eta = 1e-8` it gave `-6.7e7 i` instead of `-i`, the impurity chain's
   `T(0)` came out 1.4e-15 instead of 0.862, and at the default
@@ -1848,8 +2063,6 @@ These are deliberate choices, not oversights:
   inelastic electron-phonon scattering is not implemented.
   Electron-electron interaction enters only as a self-energy you
   supply; there is no mean-field or GW self-consistency.
-- `bond_currents` works in an orthogonal basis only (it takes no
-  overlap arguments).
 - `kpm_sigma` covers orthogonal, finite models and the longitudinal
   response only. A KPM Hall conductivity of a finite system is not
   offered: in this position convention it is zero for any bounded
@@ -1859,18 +2072,32 @@ These are deliberate choices, not oversights:
   interpolation; it does not build maximally localized Wannier
   functions (Marzari and Vanderbilt, Phys. Rev. B 56, 12847 (1997), is
   not implemented).
-- The quantum-geometry functions and the Berry curvature dipole
-  handle orthogonal bases only.
+- With overlap, the quantum-geometry functions use the
+  Loewdin-orthogonalized orbitals, each placed at its own site, and the
+  Berry curvature dipole the curvature of the atomic frame (overlap at
+  the bond midpoint). Both choices give the right Chern number, but the
+  local metric and curvature of a nonorthogonal basis depend on such a
+  choice, and the two differ locally. Intra-atomic dipole blocks
+  (`set_dipole`) do not enter the geometry.
+- With overlap, the Kubo Hall conductivity of `sigma_tensor` is not
+  exactly `C e^2/h`. The velocity `dH/dk - (e_n + e_m)/2 dS/dk`
+  corresponds to position matrix elements `S_ij (tau_i + tau_j)/2`, and
+  with them x and y do not commute. For the Haldane model
+  (`haldane(s=0.1, m_ab=0.2)`) the insulator gives 1.00336 e^2/h on any
+  fine mesh, and 1.00764 for `s = 0.15` (about `s^2`). The Chern number
+  from `chern_number` or `quantum_weight` is the integer. Changing the
+  velocity to a convention with commuting positions would change every
+  optical result with overlap, so it is not done here.
 - `chern_number` returns a whole number (to rounding) on any mesh,
   but it is the right one only when the mesh resolves the Berry
-  curvature and the occupied bands are separated from the empty ones;
-  it does not check the gap.
-  `z2_invariant` and `hybrid_wannier_centers` do check it, but only at
-  the k-points they sample: a gap that closes between two points of a
-  loop is not seen, so check a result by raising `n_k`.
-- `z2_invariant` handles 2D crystals (two lattice vectors). The strong
-  and weak indices of a 3D crystal, which would follow from the Z2
-  index of six planes of its Brillouin zone, are not implemented. Time
+  curvature and the occupied bands are separated from the empty ones.
+  Since 0.16.0 it checks the gap, like `z2_invariant`,
+  `z2_invariant_3d` and `hybrid_wannier_centers`, but only at the
+  k-points it samples: a gap that closes between two grid points (or,
+  for `z2_invariant_3d`, away from its six planes) is not seen, so
+  check a result by refining the mesh or raising `n_k`.
+- `z2_invariant` handles 2D crystals (two lattice vectors) and, since
+  0.16.0, `z2_invariant_3d` 3D crystals (three). Time
   reversal is checked through what it implies for the Wannier centers
   (Kramers pairs on the two invariant lines, the same centers at `k`
   and `-k` on the starting lines); the time-reversal operator itself
@@ -1884,7 +2111,7 @@ These are deliberate choices, not oversights:
   phonons). A step in `T(E)` inside the Fermi window (a band edge)
   converges only linearly in the grid step.
 - `from_wannier90_tb` uses the diagonal position elements (the
-  centres) and ignores the off-diagonal ones, in line with the
+  centers) and ignores the off-diagonal ones, in line with the
   site-diagonal position approximation above. Both Wannier90 readers
   divide every element by the degeneracy listed in the file; files
   written with `write_ndegen_applied = true` have not been tested.

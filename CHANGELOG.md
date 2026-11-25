@@ -5,6 +5,163 @@ an exact result; the release notes on GitHub carry the full anchor
 lists. Versions below 1.0 may move the API between minor versions;
 such changes are called out here and in the release notes.
 
+## 0.16.0 (2026-11-25)
+
+The strong and weak Z2 indices of 3D crystals, overlapping orbitals in
+the quantum geometry, the Berry curvature dipole and the bond currents
+(all three refused them before), a gap check in `chern_number`, checks
+against NaN and infinite inputs that gave silent nonsense, and a
+faster `dos`. No public function was removed or renamed, and the new
+arguments come last with defaults. Results of valid calls are
+unchanged, except that `chern_number` now refuses bands that touch,
+and `dos` sums in a different order (differences of rounding size,
+4e-15 of the largest value in the tests). All 15 README examples of
+0.15.0 print exactly what they printed before.
+
+### Added
+
+- `z2_invariant_3d(model, n_occ, n_k=48, n_lines=11, frame="lowdin",
+  max_lines=1025, gap_tol=0.3, move_tol=0.3, tr_tol=1e-6,
+  gap_min=1e-6)`: the indices nu0; (nu1 nu2 nu3) of a 3D crystal with
+  time-reversal symmetry (L. Fu, C. L. Kane and E. J. Mele, Phys. Rev.
+  Lett. 98, 106803 (2007), Eqs. 2 and 3). The 2D index of the planes at
+  fractions 0 and 1/2 along each reciprocal vector is computed with the
+  Wannier-center flow of `z2_invariant` and all of its checks; nu_i is
+  the index of the plane at 1/2 along b_i, nu0 the sum mod 2 of the two
+  planes along any b_i, and the three values of nu0 must agree. Tests
+  (`tests/test_wilson_z2_3d.py`): the parity formula of Fu and Kane
+  (Phys. Rev. B 76, 045302 (2007)) at the eight time-reversal-invariant
+  momenta for a four-band cubic model in six phases (1;(000), 0;(111),
+  1;(111), 0;(000), 0;(001), 0;(010)); the atomic frame and a sheared
+  cell; an inversion-breaking term with the gap kept open; Kane-Mele
+  layers stacked along z against `z2_invariant` of one layer
+  (0;(001) and 0;(000)); refusals. Example 16.
+- Overlapping orbitals in `quantum_geometric_tensor`, `quantum_metric`
+  and `quantum_weight`: the geometry of the Loewdin-orthogonalized
+  orbitals (Bloch Hamiltonian S^-1/2 H S^-1/2, projector
+  S^1/2 C C^dag S^1/2) in the atomic gauge. Before 0.16.0 refused.
+  Tests: with S = 1 + r H the tensor equals that of the orthogonal model
+  (1e-9; measured 4e-11) although dS/dk is not zero; invariance under
+  H -> H + c S (1e-9; measured 9e-11); tr g >= 2 sqrt(det g) >= |Omega|
+  at 25 points; the curvature integrates to the plaquette Chern number
+  within 1e-5 on a 36 x 36 mesh for Chern numbers 1, 0 and -1 (measured
+  1.6e-6, 8e-7, 6e-10). Example 17.
+- Overlapping orbitals in `band_curvatures` and `berry_dipole`: energies
+  of H c = e S c, fluxes of the atomic frame of `berry_curvature`, and
+  band velocities <n| dH/dk - e_n dS/dk |n>. Before 0.16.0 refused.
+  Tests: the two integral forms converge to each other (19 %, 4.5 %,
+  2.0 % apart on meshes 48, 96, 144 for overlap 0.1); the mirror
+  constraint (1e-8; measured 6e-14); invariance under H -> H + c S with
+  mu -> mu + c (1e-10; measured 2e-13); zero for filled bands and with
+  inversion; a complete set of band curvatures sums to zero.
+- `bond_currents(..., layers_S=None, coup_S=None, lead_S00=None,
+  lead_S01=None)`: overlap, with H - E S in place of H. Tests:
+  Kirchhoff's law (1e-7; measured 1.4e-9), every cut and both contacts
+  against `transmission` with the same overlap (1e-6; measured 1e-8);
+  the impurity chain with overlap s against the closed form of the
+  orthogonal chain with hopping t - E s (1e-7; measured 6e-9); with H
+  alone the cuts are off by 0.14. Example 18.
+- `chern_number(..., gap_min=1e-6)` and `berry_curvature(...,
+  gap_min=None)`: see Fixed.
+- README examples 16 (3D Z2 indices), 17 (Chern number, quantum metric
+  and Hall conductivity with overlap) and 18 (bond currents with
+  overlap), with their output.
+
+### Changed
+
+- `chern_number` refuses, by default, occupied bands that come closer
+  than 1e-6 eV to the empty ones at a grid point (see Fixed);
+  `gap_min=None` gives the 0.15.0 behavior.
+- `dos` sorts the states and adds, for each block of energies, only the
+  states within 9 Gaussian widths (the terms left out are below
+  exp(-40.5) = 2.6e-18 each). Measured with one thread, median of 3
+  runs, on a shared machine under load: graphene with 2001 energies on
+  a 300 x 300 mesh 9.3 s before, 0.33 s now (20 to 28 times faster
+  between repeated measurements). Test:
+  `test_windowed_dos_equals_the_full_gaussian_sum` (1e-13 of the largest
+  value; measured 4e-15), also for a model whose band count changes with
+  k.
+- Two existing tests asserted that overlap models were refused by the
+  quantum geometry and by `band_curvatures`. They now assert the new
+  behavior: `tests/test_geometry.py::test_refusals` checks that an
+  overlap matrix that is not positive definite is refused (the chain
+  with s = 0.5 at k = pi), and `tests/test_nonlinear.py::test_refusals`
+  that the band curvatures of a complete set with overlap sum to zero.
+- Documented, not changed: with overlap the Kubo Hall conductivity of
+  `sigma_tensor` is not exactly quantized. The velocity
+  dH/dk - (e_n + e_m)/2 dS/dk corresponds to position matrix elements
+  S_ij (tau_i + tau_j)/2, for which x and y do not commute. The
+  insulating Haldane model with overlap 0.1 gives 1.00336 e^2/h on
+  meshes 36 and 72 (1.00764 for 0.15) while its Chern number is 1.
+  Test: `test_hall_conductivity_with_overlap_is_not_exactly_quantized`.
+  Docstring of `sigma_tensor`, README Limits and example 17.
+- The tutorials quote "hamop 0.16.0" (their output is unchanged).
+
+### Fixed
+
+- `chern_number` did not check the band gap, so it returned an integer
+  for bands that touch, where the Chern number is not defined: gapless
+  graphene with its Dirac points on a 24 x 24 mesh gave 0.0, and the
+  lowest band of the Kane-Mele model, degenerate with the second,
+  raised "vanishing link overlap; refine the grid", which no grid
+  fixes. The direct gap above band `n_occ` is now checked at every grid
+  point, by the dense and the sparse solver, in both frames. Test:
+  `test_chern_number_refuses_bands_that_touch`.
+- Non-finite inputs that gave silent nonsense are refused:
+  `add_hop` and `set_dipole` accepted NaN and infinite blocks (a NaN
+  hopping gave NaN bands, `linear_chain(t=inf)` an optical conductivity
+  of 0.0); `sigma_optical` returned [0.0] for mu = NaN and for a NaN
+  photon energy; `carrier_count` returned nan for T = NaN;
+  `drude_weight`, `carrier_density` and `berry_dipole` returned nan for
+  mu = NaN; `dos` returned [0.0] for eta = inf. The check sits in the
+  shared Fermi function, so every function that fills states refuses a
+  non-finite mu or T. Tests: `test_non_finite_blocks_are_refused`,
+  `test_non_finite_mu_and_temperature_are_refused`,
+  `test_berry_dipole_refuses_non_finite_mu`.
+- `landauer_conductance`, `landauer_current` and `thermoelectric`: a NaN
+  chemical potential failed with NumPy's "zero-size array to reduction
+  operation maximum", and `spin=-2` returned G = -2 for an open
+  channel. Both are refused with a message. Test:
+  `test_landauer_inputs_are_checked`.
+
+### Not included
+
+- A velocity with commuting position operators for overlap models, which
+  would make the Hall conductivity of `sigma_tensor` exactly quantized:
+  it would change every optical result with overlap and the documented
+  identity of the velocity, and no published convention was checked for
+  it here. The deviation is documented instead (see Changed).
+- The Hall coefficient in `boltzmann_transport`: it needs second
+  k-derivatives of the band energies, which are not defined where bands
+  touch, and no independent check was prepared for it in this release.
+- `symmetry_fold` for direction-dependent quantities (sigma_xx, the
+  Drude weight): the group average of the tensor would be exact only
+  for operations that are symmetries of the velocity matrix elements,
+  and the fold checks the eigenvalues only.
+- The gap checks of `chern_number` and of the Z2 functions see only the
+  k-points they sample; a gap that closes between them, or for
+  `z2_invariant_3d` away from its six planes, is not detected.
+- With overlap, the quantum geometry (Loewdin-orthogonalized orbitals)
+  and the curvature dipole (atomic frame) use different, both valid,
+  conventions; their local curvatures differ, their Chern numbers do
+  not. No measurement or exact result was found that singles out one.
+- Files written by Wannier90 with `write_ndegen_applied = true` remain
+  untested: no such file was at hand, and one made by hand would test
+  only the reader against itself.
+- Unchanged from earlier releases: maximally localized Wannier
+  functions, inelastic or vertex-corrected SCBA, `kpm_sigma` with
+  overlap or for the Hall response, and the construction of the
+  time-reversal operator in the Z2 functions.
+
+### Checks (tests)
+
+- 293 tests (275 before): new `tests/test_regressions_0160.py` (6),
+  `tests/test_wilson_z2_3d.py` (5) and `tests/test_overlap_geometry.py`
+  (7); two assertions changed in existing tests (see Changed). Every
+  test in `tests/test_regressions_0160.py` except the `dos` equality
+  fails on 0.15.0, and so do the overlap tests except the documented
+  Hall limit. The new tests take about 7 s on a shared 2-CPU machine.
+
 ## 0.15.0 (2026-11-10)
 
 The Z2 index of 2D insulators with time-reversal symmetry and the
@@ -577,7 +734,7 @@ silent wrong answers turned into errors or correct numbers.
   `seedname_tb.dat` file (lattice vectors, H(R) and position matrix
   elements; layout from the Wannier90 user guide and the writer
   `hamiltonian_write_tb`). The model takes the cell and the orbital
-  centres (diagonal position elements at R = 0) from the file; both
+  centers (diagonal position elements at R = 0) from the file; both
   H(R) and r(R) are divided by the degeneracy of R. The off-diagonal
   position elements are returned by the loader but not used (the
   package's optics use the site-diagonal position operator).
@@ -619,13 +776,13 @@ silent wrong answers turned into errors or correct numbers.
   weights) weights. `band_edges` ignores weights, so it does not
   check them.
 
-### Behaviour changes
+### Behavior changes
 
 - `sancho_rubio(0.5, *chain_lead_blocks(t=-1.0), eta=0.0)`: before
   0.9236 + 0i (exact: 0.25 - 0.9682i), and
   `transmission([0.5], ..., eta=0.0)` gave 0.0 inside the band; now
   RuntimeError.
-- Chain lead at the band centre E = 0: with `eta = 1e-8` the surface
+- Chain lead at the band center E = 0: with `eta = 1e-8` the surface
   Green function was -6.7e7 i, now -0.999999995 i (closed form at the
   same complex energy: -(1 - eta/2) i); with the default `eta = 1e-6`
   it was -0.99996589 i, now -0.99999950 i. The impurity chain of
@@ -821,9 +978,9 @@ one line.
 - `from_wannier90` / `load_wannier90_hr` / `save_wannier90_hr`:
   strict parsing of the Wannier90 ``seedname_hr.dat`` format
   (degeneracy weights divided per the convention), model construction
-  with user-supplied lattice vectors and optional Wannier centres
+  with user-supplied lattice vectors and optional Wannier centers
   (hr.dat carries neither; they come from you, stated rather than
-  guessed -- centres are exactly irrelevant for eigenvalue-derived
+  guessed -- centers are exactly irrelevant for eigenvalue-derived
   quantities and matter only for the optical matrix elements), and
   an exact write/read round trip. Refusals with explanations: wrong
   element counts, duplicate or missing elements, truncated
@@ -834,7 +991,7 @@ one line.
   reproduces the closed-form-anchored `lattices.graphene` bands at
   random k to 1e-12, closes the gap at the Dirac point, and gives
   the identical Kubo optical conductivity through the imported
-  model; centres shift changes no eigenvalue (gauge invariance,
+  model; centers shift changes no eigenvalue (gauge invariance,
   asserted); the round trip preserves H(k) against an independent
   direct Bloch sum; degeneracy division is checked entry by entry;
   and every refusal fires on a deliberately corrupted file.
