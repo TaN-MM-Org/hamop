@@ -62,6 +62,14 @@ symmetry, for example two spin copies of a Chern insulator, is refused.
 The occupied bands must be separated from the empty ones by a direct
 gap of at least ``gap_min`` at every sampled k-point.
 
+Three dimensions (new in 0.16.0).  A 3D crystal with time-reversal
+symmetry has four Z2 indices, nu0; (nu1 nu2 nu3) (L. Fu, C. L. Kane
+and E. J. Mele, Phys. Rev. Lett. 98, 106803 (2007)).  The six planes
+of its Brillouin zone at fractions 0 and 1/2 along each reciprocal
+vector are mapped onto themselves by time reversal, and each has a 2D
+index computed exactly as above; :func:`z2_invariant_3d` combines
+them.
+
 Units: k Cartesian in 1/Angstrom, as everywhere; the centers are
 fractions of the lattice vector a_axis.
 """
@@ -77,7 +85,7 @@ from .berry import _orbital_positions, _states_many
 if TYPE_CHECKING:
     from .model import TightBindingModel
 
-__all__ = ["hybrid_wannier_centers", "z2_invariant"]
+__all__ = ["hybrid_wannier_centers", "z2_invariant", "z2_invariant_3d"]
 
 
 def _check(model, n_occ, n_k, axis, frame, need_2d):
@@ -106,18 +114,24 @@ def _check(model, n_occ, n_k, axis, frame, need_2d):
     return n_occ, n_k, axis
 
 
-def _centers(model, n_occ, s, n_k, axis, frame, gap_min):
+def _centers(model, n_occ, s, n_k, axis, frame, gap_min, other=None,
+             shift=None):
     """Sorted hybrid Wannier centers (len(s), n_occ) in [0, 1) for the
     lines at the fractions s of the other reciprocal vector (s ignored,
-    one line, for a model with one lattice vector)."""
+    one line, for a model with one lattice vector).  For a model with
+    three lattice vectors (new in 0.16.0) ``other`` names the reciprocal
+    vector the lines are spread along and ``shift`` (Cartesian) moves
+    every k-point off the plane through the origin."""
     B = model.reciprocal_vectors
     G = B[axis]
     t = np.arange(n_k) / n_k
     if B.shape[0] == 1:
         K = (t[None, :, None] * G).astype(float)
     else:
-        other = B[1 - axis]
-        K = t[None, :, None] * G + np.asarray(s, float)[:, None, None] * other
+        o = B[1 - axis] if other is None else B[other]
+        K = t[None, :, None] * G + np.asarray(s, float)[:, None, None] * o
+    if shift is not None:
+        K = K + np.asarray(shift, dtype=float)
     L, dim = K.shape[0], K.shape[2]
     st, gap = _states_many(model, K.reshape(-1, dim), n_occ, frame,
                            gaps=True)
@@ -283,6 +297,14 @@ def z2_invariant(model: TightBindingModel, n_occ: int, n_k: int = 48,
     insulator, z2 = 0 an ordinary one.
     """
     n_occ, n_k, axis = _check(model, n_occ, n_k, axis, frame, True)
+    n_lines = _check_z2_settings(n_occ, n_lines, max_lines, gap_tol,
+                                 move_tol, tr_tol)
+    return _z2_plane(model, n_occ, n_k, n_lines, axis, None, None, frame,
+                     max_lines, gap_tol, move_tol, tr_tol, gap_min)
+
+
+def _check_z2_settings(n_occ, n_lines, max_lines, gap_tol, move_tol,
+                       tr_tol):
     if n_occ % 2:
         raise ValueError("n_occ must be even: with time-reversal symmetry "
                          "the occupied bands come in Kramers pairs")
@@ -292,10 +314,18 @@ def z2_invariant(model: TightBindingModel, n_occ: int, n_k: int = 48,
     if not (0.0 < gap_tol < 0.5 and 0.0 < move_tol < 1.0 and tr_tol > 0):
         raise ValueError("need 0 < gap_tol < 1/2, 0 < move_tol < 1 and "
                          "tr_tol > 0")
+    return n_lines
 
+
+def _z2_plane(model, n_occ, n_k, n_lines, axis, other, shift, frame,
+              max_lines, gap_tol, move_tol, tr_tol, gap_min):
+    """The Z2 index of one time-reversal-invariant plane: the loops run
+    along reciprocal vector ``axis``, the lines are spread along
+    ``other`` (the remaining one when None) and every k-point is moved
+    by ``shift`` (None for a 2D model)."""
     def run(svals):
         return _centers(model, n_occ, np.asarray(svals, float), n_k, axis,
-                        frame, gap_min)
+                        frame, gap_min, other, shift)
 
     s = list(np.linspace(0.0, 0.5, n_lines))
     X = dict(zip(s, run(s)))
@@ -346,3 +376,85 @@ def z2_invariant(model: TightBindingModel, n_occ: int, n_k: int = 48,
             "s": np.array(lines),
             "centers": np.array([X[x] for x in lines]),
             "gap_centers": np.array([_largest_gap(X[x])[0] for x in lines])}
+
+
+def z2_invariant_3d(model: TightBindingModel, n_occ: int, n_k: int = 48,
+                    n_lines: int = 11, frame: str = "lowdin",
+                    max_lines: int = 1025, gap_tol: float = 0.3,
+                    move_tol: float = 0.3, tr_tol: float = 1e-6,
+                    gap_min: float = 1e-6) -> Dict[str, Any]:
+    """The four Z2 indices nu0; (nu1 nu2 nu3) of a 3D insulator with
+    time-reversal symmetry (new in 0.16.0), from the Z2 index of six
+    planes of its Brillouin zone.
+
+    L. Fu, C. L. Kane and E. J. Mele, Phys. Rev. Lett. 98, 106803
+    (2007), define the indices from the signs delta at the eight
+    time-reversal-invariant momenta Gamma_(n1 n2 n3) = (n1 b1 + n2 b2 +
+    n3 b3) / 2: (-1)^nu0 is the product of all eight (their Eq. 2) and
+    (-1)^nu_i the product of the four with n_i = 1 (their Eq. 3).  In a
+    plane that time reversal maps onto itself the product of its four
+    delta is that plane's 2D Z2 index.  So nu_i is the index of the
+    plane k_i = b_i / 2 (fraction 1/2 along b_i), and nu0 is the sum,
+    mod 2, of the indices of the planes at fractions 0 and 1/2 along any
+    one b_i.  Each plane is computed with the Wannier-center flow of
+    :func:`z2_invariant` (loops along b_(i+1), lines along b_(i+2), all
+    indices mod 3), with all of its checks.
+
+    nu0 comes out three times, once per direction i; the three values
+    must agree, and the call is refused if they do not (a plane whose
+    flow was not resolved).  nu0 = 1 is a strong topological insulator;
+    nu0 = 0 with some nu_i = 1 a weak one, which behaves like a stack of
+    2D quantum spin Hall layers; all four 0 an ordinary insulator.
+    (nu1 nu2 nu3) are the Miller indices, in the basis of the reciprocal
+    vectors, of the vector G = nu1 b1 + nu2 b2 + nu3 b3 that Fu, Kane and
+    Mele associate with the weak indices.
+
+    model : a periodic model with three lattice vectors and
+        time-reversal symmetry (Theta^2 = -1, spin explicit).
+    n_occ : number of occupied bands, even.
+    Other arguments as in :func:`z2_invariant`; they apply to each of
+    the six planes.  The six plane calculations each check that the
+    occupied bands are separated from the empty ones by ``gap_min`` at
+    every k-point they use, but a gap that closes elsewhere in the 3D
+    zone, away from these planes, is not seen.
+
+    Returns dict(nu0, nu (tuple of nu1, nu2, nu3), label (for example
+    "1;(000)"), planes: {(i, f): the dict :func:`z2_invariant` returns,
+    for the plane at fraction f = 0 or 0.5 along b_i}).
+    """
+    if model.cell is None:
+        raise ValueError("Wannier centers need a periodic model")
+    if model.cell.shape[0] != 3:
+        raise ValueError("z2_invariant_3d needs a model with three lattice "
+                         f"vectors; this one has {model.cell.shape[0]} "
+                         "(use z2_invariant for two)")
+    if frame not in ("lowdin", "atomic"):
+        raise ValueError("frame must be 'lowdin' or 'atomic'")
+    n_occ = int(n_occ)
+    if not 1 <= n_occ < model.nao:
+        raise ValueError(f"n_occ must lie in [1, {model.nao - 1}]: at "
+                         "least one band must stay empty")
+    n_k = int(n_k)
+    if n_k < 3:
+        raise ValueError("n_k (k-points along each loop) must be >= 3")
+    n_lines = _check_z2_settings(n_occ, n_lines, max_lines, gap_tol,
+                                 move_tol, tr_tol)
+    B = model.reciprocal_vectors
+    planes = {}
+    for i in range(3):
+        for f in (0.0, 0.5):
+            planes[(i, f)] = _z2_plane(
+                model, n_occ, n_k, n_lines, (i + 1) % 3, (i + 2) % 3,
+                f * B[i], frame, max_lines, gap_tol, move_tol, tr_tol,
+                gap_min)
+    nu = tuple(planes[(i, 0.5)]["z2"] for i in range(3))
+    strong = [(planes[(i, 0.0)]["z2"] + planes[(i, 0.5)]["z2"]) % 2
+              for i in range(3)]
+    if len(set(strong)) != 1:
+        raise ValueError(
+            "the strong index nu0 comes out differently along the three "
+            f"reciprocal vectors ({strong}); a plane's Wannier-center flow "
+            "was not resolved: raise n_k or n_lines, or check the band gap")
+    nu0 = strong[0]
+    return {"nu0": int(nu0), "nu": nu,
+            "label": f"{nu0};({nu[0]}{nu[1]}{nu[2]})", "planes": planes}

@@ -43,9 +43,9 @@ from .carriers import carrier_density, chemical_potential_from_density
 from .boltzmann import boltzmann_transport
 from .geometry import (quantum_geometric_tensor, quantum_metric,
                        quantum_weight)
-from .wilson import hybrid_wannier_centers, z2_invariant
+from .wilson import hybrid_wannier_centers, z2_invariant, z2_invariant_3d
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 __all__ = [
     "TightBindingModel", "gen_eigh",
     "bands", "dos", "fermi_level", "band_edges", "k_path",
@@ -73,5 +73,5 @@ __all__ = [
     "carrier_density", "chemical_potential_from_density",
     "boltzmann_transport",
     "quantum_geometric_tensor", "quantum_metric", "quantum_weight",
-    "hybrid_wannier_centers", "z2_invariant",
+    "hybrid_wannier_centers", "z2_invariant", "z2_invariant_3d",
 ]

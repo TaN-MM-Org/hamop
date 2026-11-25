@@ -23,7 +23,7 @@ def linear_chain(t: complex = -1.0, e0: float = 0.0, a: float = 1.0,
                  s: Optional[float] = None) -> TightBindingModel:
     """Infinite single-orbital chain: E(k) = e0 + 2 t cos(k a).
 
-    s: optional nearest-neighbour overlap (nonorthogonal chain).
+    s: optional nearest-neighbor overlap (nonorthogonal chain).
     """
     m = TightBindingModel(positions=[[0.0]], norb=1, cell=[[a]])
     m.add_hop(0, 0, (0,), [[e0]],
@@ -45,7 +45,7 @@ def two_site(t: complex = -1.0, e0: float = 0.0, a: float = 1.0,
 
 
 def graphene(t: float = -2.7, a: float = 2.46) -> TightBindingModel:
-    """Nearest-neighbour graphene: Dirac cones at K, bandwidth 6|t|,
+    """Nearest-neighbor graphene: Dirac cones at K, bandwidth 6|t|,
     and the universal optical sheet conductivity e^2/(4 hbar) on the
     interband plateau."""
     cell = a * np.array([[1.0, 0.0], [0.5, np.sqrt(3.0) / 2.0]])
@@ -93,13 +93,13 @@ def haldane(t1: float = -1.0, t2: float = 0.1, phi: float = 0.5 * np.pi,
             m_ab: float = 0.0, a: float = 1.0,
             s: Optional[float] = None) -> TightBindingModel:
     """Haldane honeycomb model (Haldane, PRL 61, 2015 (1988)): real
-    nearest-neighbour hop t1, complex second-neighbour hop t2 e^{i phi}
+    nearest-neighbor hop t1, complex second-neighbor hop t2 e^{i phi}
     with opposite chirality on the two sublattices, and a sublattice
     mass +/- m_ab.  The lower band carries Chern number +/-1 when
     |m_ab| < 3 sqrt(3) |t2 sin phi| and 0 outside -- the anchor the
     topology tests are pinned to.
 
-    s: optional real nearest-neighbour overlap, which deforms the bands
+    s: optional real nearest-neighbor overlap, which deforms the bands
     smoothly without closing the gap for small s, so the Chern number
     (computed in the Loewdin frame) must not change -- the anchor for
     topology in a nonorthogonal basis."""

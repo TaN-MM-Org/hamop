@@ -748,7 +748,11 @@ def device_ldos(E_list: ArrayLike, layers_H: Sequence[ArrayLike],
 def bond_currents(E: float, layers_H: Sequence[ArrayLike],
                   coup_H: Sequence[ArrayLike], lead_H00: ArrayLike,
                   lead_H01: ArrayLike, eta: float = 1e-9,
-                  sigma_int: Optional[Dict[int, Any]] = None
+                  sigma_int: Optional[Dict[int, Any]] = None,
+                  layers_S: Optional[Sequence[Any]] = None,
+                  coup_S: Optional[Sequence[Any]] = None,
+                  lead_S00: Optional[ArrayLike] = None,
+                  lead_S01: Optional[ArrayLike] = None
                   ) -> Tuple[np.ndarray, np.ndarray]:
     """Energy-resolved bond-current map at zero temperature for
     left-lead injection, in transmission units (Paulsson and
@@ -765,15 +769,24 @@ def bond_currents(E: float, layers_H: Sequence[ArrayLike],
     computed by the independent `transmission` code path; and the
     first/last layers inject/drain exactly +T/-T.
 
-    Orthogonal bases only: the function takes no overlap arguments,
-    because the bond-current partition with overlap requires
-    energy-dependent bond operators it does not implement.
+    Overlapping orbitals (since 0.16.0; before, the function took no
+    overlap arguments): ``layers_S``, ``coup_S``, ``lead_S00`` and
+    ``lead_S01`` as in :func:`transmission`, and H is replaced by
+    H - E S, the coupling that enters the Green function at energy E:
+
+        J_ij(E) = 2 Im[ (H - E S)_ji (G GamL G^dag)_ij ].
+
+    A state at energy E obeys (H - E S) psi = 0 inside the device, which
+    is what makes the currents into each orbital add up to zero; the
+    tests check Kirchhoff's law, the cuts against `transmission` with
+    the same overlap, and that the overlap matters (with H alone the
+    cuts are off).
 
     Returns (J (n, n) antisymmetric, offs).
     """
     G, offs, GamL, _ = device_greens(
-        E, layers_H, coup_H, lead_H00, lead_H01, None, None, None, None,
-        eta, sigma_int, attach_leads=True)
+        E, layers_H, coup_H, lead_H00, lead_H01, layers_S, coup_S,
+        lead_S00, lead_S01, eta, sigma_int, attach_leads=True)
     n = offs[-1]
     N = len(layers_H)
     Hfull = np.zeros((n, n), dtype=complex)
@@ -782,7 +795,20 @@ def bond_currents(E: float, layers_H: Sequence[ArrayLike],
         if i < N - 1:
             Hfull[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = coup_H[i]
             Hfull[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
-                coup_H[i].conj().T
+                np.asarray(coup_H[i]).conj().T
+    if layers_S is not None or coup_S is not None:
+        ls = [None] * N if layers_S is None else layers_S
+        cs = [None] * (N - 1) if coup_S is None else coup_S
+        Sfull = np.eye(n, dtype=complex)
+        for i in range(N):
+            if ls[i] is not None:
+                Sfull[offs[i]:offs[i + 1], offs[i]:offs[i + 1]] = ls[i]
+            if i < N - 1 and cs[i] is not None:
+                Sc = np.asarray(cs[i], dtype=complex)
+                Sfull[offs[i]:offs[i + 1], offs[i + 1]:offs[i + 2]] = Sc
+                Sfull[offs[i + 1]:offs[i + 2], offs[i]:offs[i + 1]] = \
+                    Sc.conj().T
+        Hfull = Hfull - E * Sfull
     AL = G @ GamL @ G.conj().T
     J = -2.0 * np.imag(Hfull * AL.T)
     return J, offs

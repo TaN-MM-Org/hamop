@@ -49,6 +49,8 @@ __all__ = ["band_curvatures", "berry_dipole", "fermi_occupation"]
 def fermi_occupation(e: ArrayLike, mu: float, kT: float) -> np.ndarray:
     """Fermi-Dirac occupation; kT = 0 gives the exact step."""
     e = np.asarray(e, dtype=float)
+    if not (np.isfinite(kT) and np.isfinite(mu)):
+        raise ValueError("mu and kT must be finite")
     if kT < 0:
         raise ValueError("kT must be >= 0")
     if kT == 0:
@@ -71,6 +73,20 @@ def _centers(N, b1, b2):
             + ((jj + 0.5) / N)[..., None] * b2).reshape(-1, 2)
 
 
+def _center_states(model, K, vectors):
+    """Energies (and S-normalized eigenvectors) at the rows of K, the
+    generalized problem included (new in 0.16.0)."""
+    from .eigsolve import _eigh_batch
+    H, S = model._bloch_many(K)
+    res = _eigh_batch(H, S, 1e-10, vectors)
+    if res is None:
+        raise ValueError("the overlap matrix is nearly singular at some "
+                         "plaquette center (an eigenvalue below 1e-10), so "
+                         "states would be dropped there; the curvature "
+                         "dipole needs every band at every k")
+    return res
+
+
 def band_curvatures(model: TightBindingModel, mesh: int,
                     solver: str = "dense"
                     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -86,9 +102,13 @@ def band_curvatures(model: TightBindingModel, mesh: int,
     F(n_occ = n+1) - F(n_occ = n), and the top band comes for free:
     the total flux of a complete band set is identically zero (the
     loop product of full-rank links is det of a unitary loop = 1),
-    which is also asserted in the tests. Orthogonal-basis models
-    only, refused otherwise (the velocity form below would need the
-    generalized Hellmann-Feynman term this refuses to half-implement).
+    which is also asserted in the tests.
+
+    Overlapping orbitals (since 0.16.0; refused before): the energies
+    are the generalized eigenvalues of H c = e S c, and the fluxes
+    those of the atomic frame of :func:`hamop.berry_curvature`, whose
+    links carry S at the bond midpoint.  The overlap matrix must keep
+    every direction at the plaquette centers (no state dropped).
 
     The atomic frame is used deliberately, not by preference: the
     Loewdin frame's periodic identification u(k+G) = u(k) is a gauge
@@ -105,11 +125,9 @@ def band_curvatures(model: TightBindingModel, mesh: int,
     """
     if model.cell is None or model.cell.shape != (2, 2):
         raise ValueError("band_curvatures needs a 2D periodic model")
-    if model.has_overlap():
-        raise ValueError("band-resolved curvature dipole is implemented "
-                         "for orthogonal bases only; refused for overlap "
-                         "models rather than dropping the dS terms")
     N = int(mesh)
+    if N < 1:
+        raise ValueError("mesh must be a positive number of points")
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
     b1, b2 = recip[0], recip[1]
     a_bz = abs(b1[0] * b2[1] - b1[1] * b2[0])
@@ -117,8 +135,8 @@ def band_curvatures(model: TightBindingModel, mesh: int,
     nb = model.nao
     # plaquette centers, all at once (since 0.14.0; same matrices as the
     # former point-by-point loop, eigenvalues equal to rounding)
-    H, _ = model._bloch_many(_centers(N, b1, b2))
-    energies = np.linalg.eigvalsh(H).reshape(N, N, nb)
+    energies = _center_states(model, _centers(N, b1, b2),
+                              False)[0].reshape(N, N, nb)
     F = np.zeros((N, N, nb))
     below = np.zeros((N, N))
     for n in range(nb - 1):
@@ -143,7 +161,8 @@ def berry_dipole(model: TightBindingModel, mesh: int, mu: float, kT: float,
     method : "grad" sums f * dOmega/dk with central differences of the
     plaquette-flux field (works at kT = 0); "fermi" sums
     -Omega * f'(eps) * v with the analytic Fermi-window derivative and
-    Hellmann-Feynman velocities v = <u|dH/dk|u> (needs kT > 0). The
+    Hellmann-Feynman velocities v = <u|dH/dk - e dS/dk|u> (the dS term
+    only with overlap; needs kT > 0). The
     two are independent discretizations of the two sides of the
     integration by parts, and the tests require their agreement.
 
@@ -151,6 +170,8 @@ def berry_dipole(model: TightBindingModel, mesh: int, mu: float, kT: float,
     band contributions.
     """
     N = int(mesh)
+    if not (np.isfinite(mu) and np.isfinite(kT)):
+        raise ValueError("mu and kT must be finite")
     energies, omega = band_curvatures(model, N, solver=solver)
     nb = energies.shape[2]
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
@@ -176,12 +197,14 @@ def berry_dipole(model: TightBindingModel, mesh: int, mu: float, kT: float,
         dfde = _dfermi_deps(energies, mu, kT)
         vel = np.empty((N, N, nb, 2))
         K = _centers(N, b1, b2)
-        H, _ = model._bloch_many(K)
-        _, U = np.linalg.eigh(H)
+        e_c, U = _center_states(model, K, True)
         Uh = np.conj(np.swapaxes(U, 1, 2))
         for a in range(2):
-            dH, _ = model._bloch_many(K, a)
+            dH, dS = model._bloch_many(K, a)
             v = np.real(np.diagonal(Uh @ dH @ U, axis1=1, axis2=2))
+            if dS is not None:               # overlap, since 0.16.0
+                v = v - e_c * np.real(np.diagonal(Uh @ dS @ U, axis1=1,
+                                                  axis2=2))
             vel[:, :, :, a] = v.reshape(N, N, nb)
         for n in range(nb):
             for a in range(2):

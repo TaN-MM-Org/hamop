@@ -52,6 +52,12 @@ def fermi_dirac(e: ArrayLike, mu: float, T: float) -> np.ndarray:
     level exactly at mu (the T -> 0+ limit of f(mu) = 1/2), so a level
     sitting at mu no longer turns into 0/0 = NaN."""
     e = np.asarray(e, dtype=float)
+    # NaN passes "T < 0" and gave NaN occupations, and a NaN mu gave an
+    # optical conductivity of exactly 0 without a word (before 0.16.0)
+    if not np.all(np.isfinite(T)):
+        raise ValueError("T must be a finite temperature (K)")
+    if not np.all(np.isfinite(mu)):
+        raise ValueError("mu (the chemical potential, eV) must be finite")
     if T < 0:
         raise ValueError("T must be >= 0 K")
     if T == 0:
@@ -177,6 +183,10 @@ class TightBindingModel:
                 f"has {self.cell.shape[0]} lattice vectors; give one "
                 "integer per lattice vector")
         H_block = np.asarray(H_block, dtype=complex)
+        if not np.all(np.isfinite(H_block)):
+            # before 0.16.0 a NaN gave NaN bands and an infinite hopping
+            # an optical conductivity of 0, both without an error
+            raise ValueError("H block must be finite (no NaN or inf)")
         if H_block.shape != (self.norb[i], self.norb[j]):
             raise ValueError(
                 f"H block shape {H_block.shape} != "
@@ -186,6 +196,8 @@ class TightBindingModel:
             raise ValueError("on-site block must be Hermitian")
         if S_block is not None:
             S_block = np.asarray(S_block, dtype=complex)
+            if not np.all(np.isfinite(S_block)):
+                raise ValueError("S block must be finite (no NaN or inf)")
             if S_block.shape != H_block.shape:
                 raise ValueError("S block shape must match H block shape")
             if onsite and not np.allclose(S_block, S_block.conj().T):
@@ -225,6 +237,8 @@ class TightBindingModel:
         """
         i = self._site_index(i)
         X = np.asarray(X, dtype=complex)
+        if not np.all(np.isfinite(X)):
+            raise ValueError("dipole block must be finite (no NaN or inf)")
         dim = self.positions.shape[1]
         if X.shape != (self.norb[i], self.norb[i], dim):
             raise ValueError(

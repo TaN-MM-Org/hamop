@@ -20,7 +20,7 @@ Convention: the real part of the sheet conductivity is returned in
 units of e^2 / (4 hbar) -- for reference, that unit is exactly the
 universal optical sheet conductivity of graphene (Kuzmenko et al.,
 Phys. Rev. Lett. 100, 117401 (2008)), and the test suite reproduces
-sigma = 1 on the graphene plateau from the nearest-neighbour model.
+sigma = 1 on the graphene plateau from the nearest-neighbor model.
 Spin degeneracy enters as the explicit factor ``spin`` (default 2).
 """
 from __future__ import annotations
@@ -43,6 +43,8 @@ __all__ = ["sigma_optical", "sigma_tensor", "carrier_count",
 def _check_T(T, strict=False):
     """Refuse temperatures the Fermi factors cannot use: T < 0 always,
     and T = 0 where -df/de must be sampled on a k-mesh (strict)."""
+    if not np.isfinite(T):
+        raise ValueError("T must be a finite temperature (K)")
     if strict and not T > 0:
         raise ValueError("T must be > 0 K here: the Fermi-surface "
                          "factor -df/de is sampled on the k-mesh and "
@@ -108,8 +110,8 @@ def sigma_optical(model: TightBindingModel, omega: ArrayLike, mu: float,
     of an area (unit e^2/(4 hbar) times Angstrom), as for a 1D chain.
     """
     omega = np.atleast_1d(np.asarray(omega, dtype=float))
-    if np.any(omega <= 0):
-        raise ValueError("omega must be positive photon energies")
+    if not np.all(omega > 0) or not np.all(np.isfinite(omega)):
+        raise ValueError("omega must be positive, finite photon energies")
     if not eta > 0:
         raise ValueError("eta (the line width, eV) must be > 0")
     if lineshape not in ("gaussian", "lorentzian"):
@@ -188,6 +190,14 @@ def sigma_tensor(model: TightBindingModel, omega: ArrayLike, mu: float,
     C exactly the package's :func:`hamop.chern_number` of the occupied
     bands -- the test suite asserts that internal consistency on the
     Haldane model, sign included.
+
+    With overlap that relation holds only approximately: the velocity
+    above corresponds to position matrix elements S_ij (tau_i + tau_j)/2,
+    and with them x and y do not commute, so sigma_xy(0) of an
+    insulator is not an exact multiple of e^2/h.  For the Haldane model
+    with overlap s = 0.1 (``haldane(s=0.1, m_ab=0.2)``) it is
+    1.00336 e^2/h on any fine mesh, and the deviation grows about as
+    s^2 (1.00764 for s = 0.15); the Chern number itself is 1.
     """
     a, b = directions
     omega = np.atleast_1d(np.asarray(omega, dtype=float))
@@ -283,6 +293,8 @@ def drude_weight(model: TightBindingModel, mu: float,
     needs thermal smearing (T = 0 is refused).
     """
     _check_T(T, strict=True)
+    if not np.isfinite(mu):
+        raise ValueError("mu (the chemical potential, eV) must be finite")
     if not degen_tol >= 0:
         raise ValueError("degen_tol (eV) must be >= 0")
     if mesh is not None:

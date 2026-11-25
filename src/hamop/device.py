@@ -7,7 +7,7 @@ principal layers of a chosen width; the dense H (and S) are then cut
 into on-layer and nearest-layer blocks.
 
 The partition is *verified*, not assumed: if any Hamiltonian or overlap
-matrix element couples layers further than nearest neighbours -- i.e.
+matrix element couples layers further than nearest neighbors -- i.e.
 the chosen layer width is smaller than the interaction range -- the
 function raises with the magnitude of the offending element instead of
 silently truncating physics.  The test suite asserts both directions:
@@ -73,7 +73,7 @@ def principal_layers(model: TightBindingModel, layer_width: float,
              for L in range(n_layers)]
     offs = np.concatenate([[0], np.cumsum(sizes)])
 
-    # refuse partitions whose layers couple beyond nearest neighbours
+    # refuse partitions whose layers couple beyond nearest neighbors
     for La in range(n_layers):
         for Lb in range(La + 2, n_layers):
             blk = H[offs[La]:offs[La + 1], offs[Lb]:offs[Lb + 1]]

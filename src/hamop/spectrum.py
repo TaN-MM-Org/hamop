@@ -96,23 +96,65 @@ def dos(model: TightBindingModel, energies: ArrayLike,
     Either ``mesh`` (a Monkhorst-Pack grid) or explicit ``kpts`` with
     ``weights`` summing to one.  Spin degeneracy is *not* included; the
     integral over all energies equals the number of orbitals kept per
-    cell.
+    cell.  Since 0.16.0 each energy is summed over the states within 9
+    widths ``eta`` of it only; the Gaussian tails left out are below
+    exp(-40.5) = 2.6e-18 of a full line each.
     """
-    if not eta > 0:
+    if not (eta > 0 and np.isfinite(eta)):
         raise ValueError("eta (the Gaussian width, eV) must be > 0")
     kpts, weights = _grid(model, mesh, kpts, weights)
     E = np.asarray(energies, dtype=float)
     Ef = E.reshape(-1)
+    if not np.all(np.isfinite(Ef)):
+        raise ValueError("energies must be finite")
     rho = np.zeros(Ef.shape)
-    piece = max(1, (1 << 22) // max(1, Ef.size))
     norm = 1.0 / (eta * np.sqrt(2.0 * np.pi))
+    # Since 0.16.0 the states are collected and sorted, and each block of
+    # energies is summed over the states within _CUT widths of it only
+    # (see `_gauss_sum`); before, every energy met every state.
+    ev_buf, wv_buf, n_buf = [], [], 0
     for w, e, _, _ in _eig_chunks(model, kpts, weights, thresh=thresh):
-        ev = e.ravel()
-        wv = np.repeat(w, e.shape[1])
-        for s in range(0, ev.size, piece):
-            x = (Ef[:, None] - ev[None, s:s + piece]) / eta
-            rho += np.exp(-0.5 * x * x) @ wv[s:s + piece]
+        ev_buf.append(e.ravel())
+        wv_buf.append(np.repeat(w, e.shape[1]))
+        n_buf += e.size
+        if n_buf >= _BUFFER:
+            _gauss_sum(Ef, np.concatenate(ev_buf), np.concatenate(wv_buf),
+                       eta, rho)
+            ev_buf, wv_buf, n_buf = [], [], 0
+    if n_buf:
+        _gauss_sum(Ef, np.concatenate(ev_buf), np.concatenate(wv_buf),
+                   eta, rho)
     return (rho * norm).reshape(E.shape)
+
+
+# Gaussian tails beyond _CUT widths are left out of `dos`:
+# exp(-_CUT^2 / 2) = 2.6e-18, so the sum changes by less than 2.6e-18 of
+# the total weight (states per cell) times 1/(eta sqrt(2 pi)).
+_CUT = 9.0
+_BUFFER = 1 << 22        # states collected before they are summed
+
+
+def _gauss_sum(Ef, ev, wv, eta, rho, block=64):
+    """Add sum_s wv_s exp(-(Ef - ev_s)^2 / (2 eta^2)) to rho, for each
+    energy of Ef, over the states within _CUT eta of it.  The states and
+    the energies are sorted, so each block of neighboring energies meets
+    one contiguous slice of states.  States inside the slice but farther
+    than _CUT eta from a given energy are still added (exactly), so the
+    only terms left out are below exp(-_CUT^2 / 2) each."""
+    order = np.argsort(ev, kind="stable")
+    ev, wv = ev[order], wv[order]
+    eorder = np.argsort(Ef, kind="stable")
+    Es = Ef[eorder]
+    lo = np.searchsorted(ev, Es - _CUT * eta, side="left")
+    hi = np.searchsorted(ev, Es + _CUT * eta, side="right")
+    piece = 1 << 22
+    for b in range(0, Es.size, block):
+        sel = eorder[b:b + block]
+        s0, s1 = int(lo[b]), int(hi[min(b + block, Es.size) - 1])
+        for s in range(s0, s1, max(1, piece // max(1, sel.size))):
+            t = min(s1, s + max(1, piece // max(1, sel.size)))
+            x = (Ef[sel, None] - ev[None, s:t]) / eta
+            rho[sel] += np.exp(-0.5 * x * x) @ wv[s:t]
 
 
 def fermi_level(model: TightBindingModel, filling: float,

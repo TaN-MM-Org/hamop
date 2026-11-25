@@ -76,7 +76,7 @@ def _minus_dfde(E, mu, T):
     return q / (kT * (1.0 + q) ** 2)
 
 
-def _prepare(E, trans, mus, T, window):
+def _prepare(E, trans, mus, T, window, spin=2):
     E = np.asarray(E, dtype=float).ravel()
     tr = np.asarray(trans, dtype=float).ravel()
     if E.shape != tr.shape:
@@ -92,7 +92,13 @@ def _prepare(E, trans, mus, T, window):
         raise ValueError("window must be > 0 (the number of kT the grid "
                          "must reach beyond the chemical potentials; 30 "
                          "leaves a tail below 1e-10)")
-    if not T > 0:
+    if not np.all(np.isfinite(mus)):
+        # before 0.16.0 a NaN mu failed later with NumPy's "zero-size
+        # array to reduction operation maximum"
+        raise ValueError("the chemical potentials must be finite")
+    if not (np.isfinite(spin) and spin > 0):
+        raise ValueError("spin (the degeneracy factor) must be > 0")
+    if not (np.isfinite(T) and T > 0):
         raise ValueError("T must be > 0 K: the Fermi window is resolved "
                          "on the energy grid (at T = 0 the conductance "
                          "is simply spin * T(mu))")
@@ -136,7 +142,7 @@ def landauer_conductance(E: ArrayLike, trans: ArrayLike, mu: float,
 
     G = spin * integral T(E) (-df/dE) dE.
     """
-    E, tr = _prepare(E, trans, [mu], T, window)
+    E, tr = _prepare(E, trans, [mu], T, window, spin)
     return spin * _moments(E, tr, mu, T)[0]
 
 
@@ -155,7 +161,7 @@ def thermoelectric(E: ArrayLike, trans: ArrayLike, mu: float, T: float,
     in :func:`landauer_conductance`.  Refuses a grid where L0 = 0
     (nothing transmits in the Fermi window, so S is undefined).
     """
-    E, tr = _prepare(E, trans, [mu], T, window)
+    E, tr = _prepare(E, trans, [mu], T, window, spin)
     L0, L1, L2 = _moments(E, tr, mu, T)
     if not L0 > 0:
         raise ValueError("no transmission inside the Fermi window "
@@ -178,6 +184,6 @@ def landauer_current(E: ArrayLike, trans: ArrayLike, mu_L: float,
     Positive when mu_L > mu_R and T(E) > 0.  The grid must cover
     ``window`` kT beyond both chemical potentials.
     """
-    E, tr = _prepare(E, trans, [mu_L, mu_R], T, window)
+    E, tr = _prepare(E, trans, [mu_L, mu_R], T, window, spin)
     df = fermi_dirac(E, mu_L, T) - fermi_dirac(E, mu_R, T)
     return spin * _trapz(tr * df, E)

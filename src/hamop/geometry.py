@@ -42,13 +42,34 @@ must agree with the projector computation, and the Chern number
 integrated from the QGT's Omega must equal the package's own
 plaquette `chern_number` -- a third, independent path.
 
+Overlapping orbitals (new in 0.16.0).  With an overlap matrix S(k)
+the occupied states are not orthonormal in the orbital basis, and
+there is more than one way to define their geometry.  The one used
+here replaces the orbitals by their Loewdin-orthogonalized
+combinations (the Bloch Hamiltonian S^-1/2 H S^-1/2, which has the
+same energies), each taken to sit at its own site, in the atomic gauge
+used everywhere else.  Its occupied projector is
+P = S^1/2 C C^dag S^1/2 (C the S-normalized occupied eigenvectors), a
+true projector, so everything above holds as written: Q is positive
+semidefinite, tr g >= 2 sqrt(det g) >= |Omega| at every k, and Omega
+integrates to the Chern number of :func:`hamop.chern_number` (both of
+its frames give the same integer).  Moving the energy zero
+(H -> H + c S) changes nothing.  For S = 1 it is the projector of the
+orthogonal case.  The metric of a nonorthogonal basis is a
+convention; another choice gives a different local metric with the
+same Chern number.  In particular this is not the convention of the
+optics, whose velocity with overlap, dH/dk - (e_n + e_m)/2 dS/dk,
+corresponds to position matrix elements S_ij (tau_i + tau_j) / 2 for
+which x and y do not commute; that is why the Hall conductivity of
+:func:`hamop.sigma_tensor` is not exactly quantized with overlap (see
+the README, "Limits").
+
 Conventions: k Cartesian in 1/Angstrom, so g is in Angstrom^2 and
-Omega in Angstrom^2; models with orbital overlaps are refused (the
-geometry of a nonorthogonal basis needs S-weighted inner products
-this module does not implement -- designed out, not half-shipped);
-and a band crossing through the occupied/empty boundary makes the
-projector jump, so a gap smaller than `gap_min` at any evaluation
-point is refused with the gap named.
+Omega in Angstrom^2.  Intra-atomic dipole blocks (``set_dipole``) do
+not enter: the geometry is that of the Bloch states in the
+site-diagonal position convention.  A band crossing through the
+occupied/empty boundary makes the projector jump, so a gap smaller
+than `gap_min` at any evaluation point is refused with the gap named.
 """
 from __future__ import annotations
 
@@ -64,13 +85,27 @@ __all__ = ["quantum_geometric_tensor", "quantum_metric",
            "quantum_weight"]
 
 
+def _loewdin(H, S):
+    """S^-1/2 H S^-1/2 for a stack of matrices (new in 0.16.0): the
+    Bloch Hamiltonian of the Loewdin-orthogonalized orbitals, with the
+    generalized eigenvalues of (H, S) and eigenvectors S^1/2 c.  S must
+    be positive definite at every k."""
+    w, V = np.linalg.eigh(S)
+    if not w.min() > 1e-10:
+        raise ValueError(
+            "the overlap matrix is not positive definite at some k "
+            f"(smallest eigenvalue {w.min():.3e}), so the orthogonalized "
+            "orbitals, and with them the quantum geometry, are not "
+            "defined there")
+    X = (V / np.sqrt(w)[..., None, :]) @ np.conj(np.swapaxes(V, -1, -2))
+    HL = X @ H @ X
+    return 0.5 * (HL + np.conj(np.swapaxes(HL, -1, -2)))
+
+
 def _projector(model, k, n_occ, gap_min):
     H, S = model.bloch(np.asarray(k, dtype=float))
-    if model.has_overlap():
-        raise ValueError(
-            "quantum geometry with orbital overlaps is not "
-            "implemented (nonorthogonal bases need S-weighted inner "
-            "products); orthogonalize the model first")
+    if model.has_overlap():                # new in 0.16.0
+        H = _loewdin(H, S)
     e, v = np.linalg.eigh(H)
     if n_occ < 1 or n_occ >= e.size:
         raise ValueError(f"n_occ must lie in [1, {e.size - 1}]")
@@ -87,12 +122,9 @@ def _projector(model, k, n_occ, gap_min):
 
 def _projectors_many(model, K, n_occ, gap_min):
     """`_projector` at every row of K, shape (nk, nao, nao)."""
-    if model.has_overlap():
-        raise ValueError(
-            "quantum geometry with orbital overlaps is not "
-            "implemented (nonorthogonal bases need S-weighted inner "
-            "products); orthogonalize the model first")
-    H, _ = model._bloch_many(K)
+    H, S = model._bloch_many(K)
+    if S is not None:                      # overlap, new in 0.16.0
+        H = _loewdin(H, S)
     e, v = np.linalg.eigh(H)
     if n_occ < 1 or n_occ >= e.shape[1]:
         raise ValueError(f"n_occ must lie in [1, {e.shape[1] - 1}]")

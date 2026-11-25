@@ -101,12 +101,17 @@ def _bloch_periodic(model, k):
     return 0.5 * (H + H.conj().T), S
 
 
-def _lowest_dense(H, n_occ):
-    _, c = eigh(H)
+def _lowest_dense(H, n_occ, gaps=None):
+    e, c = eigh(H)
+    if gaps is not None:
+        gaps.append(e[n_occ] - e[n_occ - 1] if n_occ < e.size else np.inf)
     return c[:, :n_occ]
 
 
-def _lowest_sparse(H, n_occ):
+def _lowest_sparse(H, n_occ, gaps=None):
+    """Lowest n_occ eigenvectors by Lanczos; with a list ``gaps`` (new
+    in 0.16.0) one more eigenvalue is computed and the direct gap above
+    the occupied bands is appended to it."""
     from scipy.sparse import csr_matrix
     from scipy.sparse.linalg import eigsh
     n = H.shape[0]
@@ -114,18 +119,26 @@ def _lowest_sparse(H, n_occ):
         raise ValueError(
             "solver='sparse' (Lanczos) needs n_occ < nao - 1; use the "
             "dense solver for this small a matrix")
-    _, c = eigsh(csr_matrix(H), k=n_occ, which="SA")
-    return c
+    if gaps is None:
+        _, c = eigsh(csr_matrix(H), k=n_occ, which="SA")
+        return c
+    if n_occ + 1 < n - 1:
+        e, c = eigsh(csr_matrix(H), k=n_occ + 1, which="SA")
+    else:                         # too small for Lanczos with one more
+        e, c = eigh(np.asarray(H))
+    order = np.argsort(e)
+    gaps.append(float(e[order[n_occ]] - e[order[n_occ - 1]]))
+    return c[:, order[:n_occ]]
 
 
-def _occ_states(model, k, n_occ, solver="dense"):
+def _occ_states(model, k, n_occ, solver="dense", gaps=None):
     """Loewdin-orthonormal frame of the lowest n_occ bands at k
     (periodic gauge)."""
     H, S = _bloch_periodic(model, k)
     if not model.has_overlap():
         if solver == "sparse":
-            return _lowest_sparse(H, n_occ)
-        return _lowest_dense(H, n_occ)
+            return _lowest_sparse(H, n_occ, gaps)
+        return _lowest_dense(H, n_occ, gaps)
     if solver == "sparse":
         raise ValueError("solver='sparse' supports orthogonal models "
                          "only (the Loewdin map is dense)")
@@ -135,34 +148,38 @@ def _occ_states(model, k, n_occ, solver="dense"):
             "berry: S(k) is not positive definite at this k "
             f"(min overlap eigenvalue {w.min():.3e}); the Loewdin frame "
             "is undefined for an (over)complete basis here")
-    _, c = gen_eigh(H, S, eigvals_only=False)
+    e, c = gen_eigh(H, S, eigvals_only=False)
+    if gaps is not None:
+        gaps.append(e[n_occ] - e[n_occ - 1] if n_occ < e.size else np.inf)
     d = (V * np.sqrt(w)) @ (V.conj().T @ c[:, :n_occ])
     return d
 
 
-def _occ_states_atomic(model, k, n_occ, solver="dense"):
+def _occ_states_atomic(model, k, n_occ, solver="dense", gaps=None):
     """Occupied eigenvectors at k in the atomic gauge, S-normalized --
     the same assembly every other observable uses."""
     H, S = model.bloch(k)
     if not model.has_overlap():
         if solver == "sparse":
-            return _lowest_sparse(H, n_occ)
-        return _lowest_dense(H, n_occ)
+            return _lowest_sparse(H, n_occ, gaps)
+        return _lowest_dense(H, n_occ, gaps)
     if solver == "sparse":
         raise ValueError("solver='sparse' supports orthogonal models "
                          "only")
-    _, c = gen_eigh(H, S, eigvals_only=False)
+    e, c = gen_eigh(H, S, eigvals_only=False)
+    if gaps is not None:
+        gaps.append(e[n_occ] - e[n_occ - 1] if n_occ < e.size else np.inf)
     return c[:, :n_occ]
 
 
-def _get_states(model, k, n_occ, frame, solver):
+def _get_states(model, k, n_occ, frame, solver, gaps=None):
     if not 1 <= int(n_occ) <= model.nao:
         raise ValueError(f"n_occ must lie in [1, {model.nao}] (the number "
                          "of bands of this model)")
     if frame == "lowdin":
-        return _occ_states(model, k, n_occ, solver)
+        return _occ_states(model, k, n_occ, solver, gaps)
     if frame == "atomic":
-        return _occ_states_atomic(model, k, n_occ, solver)
+        return _occ_states_atomic(model, k, n_occ, solver, gaps)
     raise ValueError("frame must be 'lowdin' or 'atomic'")
 
 
@@ -278,8 +295,8 @@ def berry_phase(model: TightBindingModel, kpts: Sequence[ArrayLike],
 
 
 def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
-                    frame: str = "lowdin",
-                    solver: str = "dense") -> np.ndarray:
+                    frame: str = "lowdin", solver: str = "dense",
+                    gap_min: Optional[float] = None) -> np.ndarray:
     """Lattice Berry curvature (plaquette fluxes) of the lowest
     ``n_occ`` bands on a mesh x mesh grid of the 2D Brillouin zone.
 
@@ -299,6 +316,12 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
     two lattice vectors of the same crystal were listed in the other
     order (the Haldane model gave C = -1 while sigma_xy = +e^2/h).
 
+    gap_min (new in 0.16.0): when given, the direct gap between band
+    ``n_occ`` and band ``n_occ + 1`` must be at least ``gap_min`` (eV)
+    at every grid point, or the call is refused (see
+    :func:`chern_number`).  None (the default here) skips the check;
+    it is never applied when ``n_occ`` is the number of bands.
+
     Since 0.14.0 the dense solver assembles and diagonalizes all grid
     points at once and takes the link determinants as array operations
     (the same links as before; the fluxes agree with the former
@@ -314,15 +337,24 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
     if not 1 <= int(n_occ) <= model.nao:
         raise ValueError(f"n_occ must lie in [1, {model.nao}] (the number "
                          "of bands of this model)")
+    if gap_min is not None and not (np.isfinite(gap_min) and gap_min >= 0):
+        raise ValueError("gap_min (eV) must be a finite number >= 0")
+    check = gap_min is not None and int(n_occ) < model.nao
     if solver != "dense":
-        F = _berry_curvature_loop(model, N, n_occ, frame, solver)
+        gaps = [] if check else None
+        F = _berry_curvature_loop(model, N, n_occ, frame, solver, gaps)
+        if check:
+            _refuse_small_gap(np.asarray(gaps), gap_min, n_occ)
         return _counterclockwise(model, F)
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
     b1, b2 = recip[0], recip[1]
     n_pts = N if frame == "lowdin" else N + 1
     ii, jj = np.meshgrid(np.arange(n_pts), np.arange(n_pts), indexing="ij")
     K = ((ii / N)[..., None] * b1 + (jj / N)[..., None] * b2).reshape(-1, 2)
-    st = _states_many(model, K, int(n_occ), frame)
+    st = _states_many(model, K, int(n_occ), frame, gaps=check)
+    if check:
+        st, gap = st
+        _refuse_small_gap(gap, gap_min, n_occ, K)
     st = st.reshape(n_pts, n_pts, model.nao, int(n_occ))
     Kg = K.reshape(n_pts, n_pts, 2)
     if frame == "lowdin":
@@ -344,6 +376,21 @@ def berry_curvature(model: TightBindingModel, mesh: int, n_occ: int = 1,
                         kat(c0, c1), at(c0, c1))
         prod = u if prod is None else prod * u
     return _counterclockwise(model, np.angle(prod).astype(float))
+
+
+def _refuse_small_gap(gap, gap_min, n_occ, K=None):
+    """Refuse a grid on which the occupied bands touch the empty ones
+    (new in 0.16.0): the Chern number of the lowest n_occ bands is not
+    defined there, and the lattice sum would still return an integer."""
+    bad = int(np.argmin(gap))
+    if not gap[bad] >= gap_min:
+        where = "" if K is None else f" at k = {np.round(K[bad], 6).tolist()}"
+        raise ValueError(
+            f"the direct gap above the {int(n_occ)} occupied bands is "
+            f"{gap[bad]:.3g} (< gap_min = {gap_min:g}){where}: the occupied "
+            "bands touch the empty ones there, so their Chern number is "
+            "not defined; check n_occ (a degenerate pair must be counted "
+            "together) or the model, or lower gap_min")
 
 
 def _counterclockwise(model, F):
@@ -466,7 +513,7 @@ def _links_many(model, frame, k_from, s_from, k_to, s_to):
     return d / np.abs(d)
 
 
-def _berry_curvature_loop(model, N, n_occ, frame, solver):
+def _berry_curvature_loop(model, N, n_occ, frame, solver, gaps=None):
     """One k-point at a time (the form used for every solver before
     0.14.0; kept for solver="sparse")."""
     recip = 2.0 * np.pi * np.linalg.inv(model.cell).T
@@ -475,7 +522,7 @@ def _berry_curvature_loop(model, N, n_occ, frame, solver):
         # periodic gauge: u(k + b) is identified with u(k); index mod N
         kg = [[(i / N) * b1 + (j / N) * b2 for j in range(N)]
               for i in range(N)]
-        st = [[_get_states(model, kg[i][j], n_occ, frame, solver)
+        st = [[_get_states(model, kg[i][j], n_occ, frame, solver, gaps)
                for j in range(N)] for i in range(N)]
 
         def K(i, j):
@@ -486,7 +533,7 @@ def _berry_curvature_loop(model, N, n_occ, frame, solver):
     else:
         kg = [[(i / N) * b1 + (j / N) * b2 for j in range(N + 1)]
               for i in range(N + 1)]
-        st = [[_get_states(model, kg[i][j], n_occ, frame, solver)
+        st = [[_get_states(model, kg[i][j], n_occ, frame, solver, gaps)
                for j in range(N + 1)] for i in range(N + 1)]
 
         def K(i, j):
@@ -511,12 +558,27 @@ def _berry_curvature_loop(model, N, n_occ, frame, solver):
 
 
 def chern_number(model: TightBindingModel, mesh: int = 24, n_occ: int = 1,
-                 frame: str = "lowdin", solver: str = "dense") -> float:
+                 frame: str = "lowdin", solver: str = "dense",
+                 gap_min: Optional[float] = 1e-6) -> float:
     """Chern number of the lowest ``n_occ`` bands (exact integer of the
     lattice field strength; float returned is integer to numerical
     rounding, which the tests pin to 1e-12).  The tests also assert
-    that the two frames and the two solvers return the same integer."""
-    F = berry_curvature(model, mesh, n_occ, frame=frame, solver=solver)
+    that the two frames and the two solvers return the same integer.
+
+    gap_min (new in 0.16.0): the lattice sum returns an integer on any
+    grid, even when the occupied bands touch the empty ones and the
+    Chern number is not defined.  The direct gap between band ``n_occ``
+    and band ``n_occ + 1`` is therefore checked at every grid point, and
+    a gap below ``gap_min`` (eV) is refused.  Before 0.16.0 it was not
+    checked: gapless graphene (its Dirac points on a mesh of 24) gave
+    0, and the lowest band of the Kane-Mele model, which is degenerate
+    with the second one, was refused with "vanishing link overlap;
+    refine the grid", advice that does not help.  The check sees only the grid
+    points; a gap that closes between them is not seen.  gap_min=None
+    turns it off.  With ``n_occ`` equal to the number of bands there is
+    no gap to check (the Chern number of all bands is 0)."""
+    F = berry_curvature(model, mesh, n_occ, frame=frame, solver=solver,
+                        gap_min=gap_min)
     return float(F.sum() / (2.0 * np.pi))
 
 

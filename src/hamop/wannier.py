@@ -21,13 +21,13 @@ conj(H_nm(-R))), instead of symmetrizing it silently.
 
 What the file does not carry, the caller must supply, stated rather
 than guessed: the lattice vectors (`cell`, in Angstrom -- hr.dat has
-no units or cell block), and optionally the Wannier centres
+no units or cell block), and optionally the Wannier centers
 (`centers`, from ``seedname_centres.xyz``). Without centres all
 orbitals sit at the origin; every eigenvalue-derived quantity (bands,
 DOS, transmission, Chern numbers) is exactly independent of that
 choice (the atomic and R gauges differ by a unitary), but optical
 matrix elements use the site-diagonal position operator, so give the
-true centres when the optics matter.
+true centers when the optics matter.
 
 Anchors asserted in the tests rather than stated: a graphene hr.dat
 written independently of the package reproduces the closed-form
@@ -209,11 +209,11 @@ def from_wannier90(path: Union[str, PathLike], cell: ArrayLike,
         R-vector components actually used (trailing all-zero
         components of every R are dropped to match, so a 2D material
         computed in a 3D code imports as 2D).
-    centers : optional (num_wann, dim) Wannier centres in Angstrom
+    centers : optional (num_wann, dim) Wannier centers in Angstrom
         (from ``seedname_centres.xyz``). Default: all orbitals at the
         origin -- exactly irrelevant for eigenvalue-derived
         quantities, but the optical matrix elements use the
-        site-diagonal position operator, so supply the true centres
+        site-diagonal position operator, so supply the true centers
         when the optics matter (see module docstring).
 
     One site per Wannier orbital; each nonzero H_mn(R) becomes one
@@ -399,11 +399,11 @@ def from_wannier90_tb(path: Union[str, PathLike], dim: Optional[int] = None,
                       cell_tol: float = 1e-8) -> TightBindingModel:
     """Build a `TightBindingModel` from ``seedname_tb.dat`` alone (new
     in 0.11.0): the file carries the lattice vectors and the position
-    matrix elements, so neither the cell nor the Wannier centres have
+    matrix elements, so neither the cell nor the Wannier centers have
     to be supplied by hand.
 
     The orbital positions are the diagonal position elements
-    Re <m0|r|m0> (the Wannier centres as the position operator of the
+    Re <m0|r|m0> (the Wannier centers as the position operator of the
     file gives them).  The off-diagonal elements <m0|r|nR> are read
     (see :func:`load_wannier90_tb`) but not used: the package's optics
     use the site-diagonal position operator throughout (README,
@@ -440,7 +440,7 @@ def from_wannier90_tb(path: Union[str, PathLike], dim: Optional[int] = None,
             f"{dim} Cartesian axes")
     if (0, 0, 0) not in data["r_R"]:
         raise ValueError("tb.dat has no R = 0 block, so it carries no "
-                         "Wannier centres")
-    centres = np.real(np.array([data["r_R"][(0, 0, 0)][m, m, :]
+                         "Wannier centers")
+    centers = np.real(np.array([data["r_R"][(0, 0, 0)][m, m, :]
                                 for m in range(nw)]))
-    return _build_model(H_R, nw, cell3[:dim, :dim], centres[:, :dim])
+    return _build_model(H_R, nw, cell3[:dim, :dim], centers[:, :dim])
