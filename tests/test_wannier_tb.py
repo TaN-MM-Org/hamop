@@ -4,7 +4,7 @@ is written by hand in the layout of the Wannier90 writer
 '(2I5,3x,2(E15.8,1x))' Hamiltonian and '(2I5,3x,6(E15.8,1x))' position
 lines), independently of the parser.  The imported model must equal
 the lattice builder in its bands AND its optical conductivity; the
-optics depend on the Wannier centres, so they check that the centres
+optics depend on the Wannier centers, so they check that the centers
 were read from the position block."""
 import numpy as np
 import pytest
@@ -105,7 +105,7 @@ def test_tb_dat_reproduces_bands_and_optics_of_graphene(tmp_path):
     ks = np.random.default_rng(0).uniform(-2.0, 2.0, (20, 2))
     assert np.abs(hamop.bands(m, ks) - hamop.bands(ref, ks)).max() < 1e-12
     om = np.array([1.0, 2.0, 4.0])
-    # the file stores 8 significant digits (E15.8), so the centres are
+    # the file stores 8 significant digits (E15.8), so the centers are
     # exact to ~1e-9 Angstrom and the optics to 1e-7 relative
     for d in (0, 1):
         s_tb = hamop.sigma_optical(m, om, 0.0, mesh=24, eta=0.2, T=300.0,
@@ -113,14 +113,14 @@ def test_tb_dat_reproduces_bands_and_optics_of_graphene(tmp_path):
         s_ref = hamop.sigma_optical(ref, om, 0.0, mesh=24, eta=0.2,
                                     T=300.0, direction=d)
         assert np.abs(s_tb - s_ref).max() < 1e-7 * s_ref.max()
-    # the check is sensitive to the centres: all orbitals at the origin
-    # (what from_wannier90 assumes without centres) changes the optics
+    # the check is sensitive to the centers: all orbitals at the origin
+    # (what from_wannier90 assumes without centers) changes the optics
     m0 = hamop.from_wannier90_tb(p)
     m0.positions[:] = 0.0
     s0 = hamop.sigma_optical(m0, om, 0.0, mesh=24, eta=0.2, T=300.0)
     s_ref = hamop.sigma_optical(ref, om, 0.0, mesh=24, eta=0.2, T=300.0)
     assert np.abs(s0 - s_ref).max() > 1e-2 * s_ref.max()
-    # and the tb.dat route equals the hr.dat route given the same centres
+    # and the tb.dat route equals the hr.dat route given the same centers
     H_R = data["H_R"]
     q = tmp_path / "graphene_hr.dat"
     hamop.save_wannier90_hr(q, H_R)

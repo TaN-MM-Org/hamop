@@ -10,7 +10,7 @@ import hamop
 
 
 def _graphene_hr_text(t=-2.7):
-    """A nearest-neighbour graphene hr.dat, written BY HAND from the
+    """A nearest-neighbor graphene hr.dat, written BY HAND from the
     R-space Hamiltonian (A at 0, B at (a1+a2)/3): H_AB(R) = t for
     R in {(0,0), (-1,0), (0,-1)} -- an independent construction of
     the same physics as hamop.lattices.graphene."""

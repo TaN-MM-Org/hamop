@@ -141,7 +141,7 @@ def test_transmission_and_conductance_through_the_band_centre():
     T(8.9e-16) = 0.9745 for the impurity chain, exact 0.862) and the
     conductance on any grid containing E = 0 (1.5574 instead of
     1.7241 at 30 K).  Now T(E) matches the closed form to 1e-7 at and
-    around the band centre (the eta = 1e-8 broadening itself shifts it
+    around the band center (the eta = 1e-8 broadening itself shifts it
     by 3e-8), and the conductance on np.linspace(-1, 1, 2001) equals
     the one from the closed-form T(E) to 1e-7."""
     eps = 0.8

@@ -62,8 +62,8 @@ def test_impurity_device_reproduces_the_closed_form():
 
 
 def test_undersized_layer_width_is_refused():
-    """With second-neighbour hopping, one-site layers couple beyond
-    nearest neighbours and the partition must refuse."""
+    """With second-neighbor hopping, one-site layers couple beyond
+    nearest neighbors and the partition must refuse."""
     m = _finite_chain(8, t2=-0.3)
     with pytest.raises(ValueError):
         principal_layers(m, layer_width=1.0)

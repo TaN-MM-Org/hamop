@@ -42,7 +42,7 @@ def test_reduction_roughly_halves_the_grid():
 
 
 def test_complex_blocks_are_refused():
-    """Haldane has complex second-neighbour hops, so H(-k) != conj(H(k))
+    """Haldane has complex second-neighbor hops, so H(-k) != conj(H(k))
     and the fold must be refused, not silently averaged."""
     with pytest.raises(ValueError):
         haldane().monkhorst_pack(12, time_reversal=True)

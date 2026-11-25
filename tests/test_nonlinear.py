@@ -115,5 +115,7 @@ def test_refusals():
         positions=np.array([np.zeros(2), (A / 3.0) * np.array([1.5, SQ3 / 2])]),
         norb=1, cell=A * np.array([[1.0, 0.0], [0.5, SQ3 / 2.0]]))
     ov.add_hop(0, 1, (0, 0), [[-1.0]], [[0.1]])
-    with pytest.raises(ValueError):
-        band_curvatures(ov, 6)                   # overlap refused
+    # overlap models were refused before 0.16.0; now the band curvatures
+    # of a complete set still sum to zero, an exact identity
+    _, omega = band_curvatures(ov, 6)
+    assert np.max(np.abs(omega.sum(axis=2))) < 1e-10

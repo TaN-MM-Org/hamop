@@ -115,7 +115,10 @@ def test_refusals():
     with pytest.raises(ValueError, match="n_occ"):
         quantum_metric(TOPO, KPTS[0], n_occ=5)
     from hamop import linear_chain
-    m = linear_chain(t=-1.0, s=0.2)          # overlap model
-    if m.has_overlap():
-        with pytest.raises(ValueError, match="overlap"):
-            quantum_metric(m, np.array([0.3]))
+    # overlap models are handled since 0.16.0 (before: refused); an
+    # overlap matrix that is not positive definite is refused: for the
+    # chain with s = 0.5, S(k) = 1 + 2 s cos k vanishes at k = pi
+    m = linear_chain(t=-1.0, s=0.5)
+    assert m.has_overlap()
+    with pytest.raises(ValueError, match="positive definite"):
+        quantum_metric(m, np.array([np.pi]))
