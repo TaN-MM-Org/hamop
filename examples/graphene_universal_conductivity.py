@@ -1,6 +1,6 @@
 """Reproduce graphene's universal optical sheet conductivity.
 
-The interband plateau of nearest-neighbour graphene equals e^2/(4 hbar)
+The interband plateau of nearest-neighbor graphene equals e^2/(4 hbar)
 (Kuzmenko et al., PRL 100, 117401 (2008)), which is exactly 1.0 in the
 package units -- the same anchor the test suite asserts.
 """
